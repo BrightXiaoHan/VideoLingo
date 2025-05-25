@@ -22,10 +22,22 @@ def split_long_sentence(doc):
         for j in range(max(0, i - 100), i):  # limit search range to avoid overly long sentences
             if i - j >= 30:  # ensure sentence length is at least 30
                 token = doc[i-1]
-                if j == 0 or (token.is_sent_end or token.pos_ in ['VERB', 'AUX'] or token.dep_ == 'ROOT'):
-                    if dp[j] + 1 < dp[i]:
-                        dp[i] = dp[j] + 1
-                        prev[i] = j
+                # Special handling for Japanese
+                if doc.lang_ == "ja":
+                    # In Japanese, look for particles that often indicate clause boundaries
+                    if j == 0 or (token.is_sent_end or 
+                                token.pos_ in ['VERB', 'AUX'] or 
+                                token.dep_ == 'ROOT' or
+                                token.text in ['。', '、', 'が', 'で', 'て', 'し', 'から', 'ので', 'けど', 'けれど']):
+                        if dp[j] + 1 < dp[i]:
+                            dp[i] = dp[j] + 1
+                            prev[i] = j
+                else:
+                    # Original logic for other languages
+                    if j == 0 or (token.is_sent_end or token.pos_ in ['VERB', 'AUX'] or token.dep_ == 'ROOT'):
+                        if dp[j] + 1 < dp[i]:
+                            dp[i] = dp[j] + 1
+                            prev[i] = j
     
     # rebuild sentences based on optimal split points
     sentences = []

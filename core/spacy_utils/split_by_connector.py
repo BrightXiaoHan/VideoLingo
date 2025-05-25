@@ -30,7 +30,9 @@ def analyze_connectors(doc, token):
         verb_pos = "VERB"
         noun_pos = ["NOUN", "PROPN"]
     elif lang == "ja":
-        connectors = ["けれども", "しかし", "だから", "それで", "ので", "のに", "ため"]
+        connectors = ["けれども", "しかし", "だから", "それで", "ので", "のに", "ため", 
+                     "そして", "また", "でも", "ただし", "なぜなら", "つまり", "すなわち",
+                     "ところで", "さて", "ちなみに", "なお", "もし", "たとえ", "から"]
         mark_dep = "mark"
         det_pron_deps = ["case"]
         verb_pos = "VERB"

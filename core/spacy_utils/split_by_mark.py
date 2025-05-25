@@ -39,13 +39,13 @@ def split_by_mark(nlp):
             current_sentence.append(text)
         else:
             if current_sentence:
-                sentences_by_mark.append(' '.join(current_sentence))
+                sentences_by_mark.append(joiner.join(current_sentence))
                 current_sentence = []
             current_sentence.append(text)
     
     # add the last sentence
     if current_sentence:
-        sentences_by_mark.append(' '.join(current_sentence))
+        sentences_by_mark.append(joiner.join(current_sentence))
 
     with open(SPLIT_BY_MARK_FILE, "w", encoding="utf-8") as output_file:
         for i, sentence in enumerate(sentences_by_mark):

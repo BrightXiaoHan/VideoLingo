@@ -8,9 +8,17 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 def is_valid_phrase(phrase):
     # 🔍 Check for subject and verb
-    has_subject = any(token.dep_ in ["nsubj", "nsubjpass"] or token.pos_ == "PRON" for token in phrase)
-    has_verb = any((token.pos_ == "VERB" or token.pos_ == 'AUX') for token in phrase)
-    return (has_subject and has_verb)
+    # For Japanese, the dependency labels and POS tags might be different
+    if phrase and phrase[0].doc.lang_ == "ja":
+        # For Japanese, check if there's at least a verb or auxiliary verb
+        has_verb = any((token.pos_ == "VERB" or token.pos_ == 'AUX') for token in phrase)
+        # Japanese sentences can be valid without explicit subjects
+        return has_verb and len(phrase) >= 2
+    else:
+        # For other languages, use the original logic
+        has_subject = any(token.dep_ in ["nsubj", "nsubjpass"] or token.pos_ == "PRON" for token in phrase)
+        has_verb = any((token.pos_ == "VERB" or token.pos_ == 'AUX') for token in phrase)
+        return (has_subject and has_verb)
 
 def analyze_comma(start, doc, token):
     left_phrase = doc[max(start, token.i - 9):token.i]
