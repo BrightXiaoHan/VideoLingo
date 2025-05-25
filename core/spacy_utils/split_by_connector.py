@@ -84,6 +84,41 @@ def analyze_connectors(doc, token):
         return True, False
 
 def split_by_connectors(text, context_words=5, nlp=None):
+    # Check if text is too long for Japanese tokenizer
+    if nlp.lang == "ja" and len(text.encode('utf-8')) > 45000:
+        # For very long Japanese text, we need to handle it differently
+        # First split by periods to get manageable chunks
+        chunks = []
+        current_chunk = ""
+        current_bytes = 0
+        max_bytes = 40000
+        
+        temp_parts = text.split('。')
+        for i, part in enumerate(temp_parts):
+            part_with_period = part + ('。' if i < len(temp_parts) - 1 else '')
+            part_bytes = len(part_with_period.encode('utf-8'))
+            
+            if current_bytes + part_bytes > max_bytes and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = part_with_period
+                current_bytes = part_bytes
+            else:
+                current_chunk += part_with_period
+                current_bytes += part_bytes
+        
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        # Process each chunk and combine results
+        all_sentences = []
+        for chunk in chunks:
+            if chunk.strip():
+                chunk_sentences = split_by_connectors(chunk, context_words, nlp)
+                all_sentences.extend(chunk_sentences)
+        
+        return all_sentences
+    
+    # Original logic for normal-sized text
     doc = nlp(text)
     sentences = [doc.text]  # init
     

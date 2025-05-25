@@ -79,15 +79,54 @@ def split_long_by_root_main(nlp):
 
     all_split_sentences = []
     for sentence in sentences:
-        doc = nlp(sentence.strip())
-        if len(doc) > 60:
-            split_sentences = split_long_sentence(doc)
-            if any(len(nlp(sent)) > 60 for sent in split_sentences):
-                split_sentences = [subsent for sent in split_sentences for subsent in split_extremely_long_sentence(nlp(sent))]
-            all_split_sentences.extend(split_sentences)
-            rprint(f"[yellow]✂️  Splitting long sentences by root: {sentence[:30]}...[/yellow]")
+        # Check if sentence is too long for Japanese tokenizer
+        if nlp.lang == "ja" and len(sentence.strip().encode('utf-8')) > 45000:
+            rprint(f"[yellow]⚠️ Extremely long Japanese sentence detected, applying emergency split...[/yellow]")
+            # Emergency split for very long Japanese text
+            # Split by common Japanese punctuation
+            parts = []
+            current_part = ""
+            current_bytes = 0
+            max_bytes = 40000
+            
+            # Try splitting by various Japanese punctuation marks
+            temp_text = sentence.strip()
+            for char in temp_text:
+                char_bytes = len(char.encode('utf-8'))
+                if current_bytes + char_bytes > max_bytes:
+                    if current_part:
+                        parts.append(current_part)
+                    current_part = char
+                    current_bytes = char_bytes
+                else:
+                    current_part += char
+                    current_bytes += char_bytes
+            
+            if current_part:
+                parts.append(current_part)
+            
+            # Process each part
+            for part in parts:
+                if part.strip():
+                    doc = nlp(part.strip())
+                    if len(doc) > 60:
+                        split_sentences = split_long_sentence(doc)
+                        if any(len(nlp(sent)) > 60 for sent in split_sentences):
+                            split_sentences = [subsent for sent in split_sentences for subsent in split_extremely_long_sentence(nlp(sent))]
+                        all_split_sentences.extend(split_sentences)
+                    else:
+                        all_split_sentences.append(part.strip())
         else:
-            all_split_sentences.append(sentence.strip())
+            # Original logic
+            doc = nlp(sentence.strip())
+            if len(doc) > 60:
+                split_sentences = split_long_sentence(doc)
+                if any(len(nlp(sent)) > 60 for sent in split_sentences):
+                    split_sentences = [subsent for sent in split_sentences for subsent in split_extremely_long_sentence(nlp(sent))]
+                all_split_sentences.extend(split_sentences)
+                rprint(f"[yellow]✂️  Splitting long sentences by root: {sentence[:30]}...[/yellow]")
+            else:
+                all_split_sentences.append(sentence.strip())
 
     punctuation = string.punctuation + "'" + '"'  # include all punctuation and apostrophe ' and "
 

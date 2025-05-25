@@ -36,21 +36,70 @@ def analyze_comma(start, doc, token):
     return suitable_for_splitting
 
 def split_by_comma(text, nlp):
-    doc = nlp(text)
-    sentences = []
-    start = 0
-    
-    for i, token in enumerate(doc):
-        if token.text == "," or token.text == "，":
-            suitable_for_splitting = analyze_comma(start, doc, token)
+    # Check if text is too long for Japanese tokenizer
+    if nlp.lang == "ja" and len(text.encode('utf-8')) > 45000:
+        # For very long Japanese text, split into smaller chunks first
+        # Split by Japanese period to maintain sentence boundaries
+        chunks = []
+        current_chunk = ""
+        current_bytes = 0
+        max_bytes = 40000  # Leave some margin
+        
+        # Try to split by Japanese period first
+        temp_parts = text.split('。')
+        for i, part in enumerate(temp_parts):
+            part_with_period = part + ('。' if i < len(temp_parts) - 1 else '')
+            part_bytes = len(part_with_period.encode('utf-8'))
             
-            if suitable_for_splitting:
-                sentences.append(doc[start:token.i].text.strip())
-                rprint(f"[yellow]✂️  Split at comma: {doc[start:token.i][-4:]},| {doc[token.i + 1:][:4]}[/yellow]")
-                start = token.i + 1
-    
-    sentences.append(doc[start:].text.strip())
-    return sentences
+            if current_bytes + part_bytes > max_bytes and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = part_with_period
+                current_bytes = part_bytes
+            else:
+                current_chunk += part_with_period
+                current_bytes += part_bytes
+        
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        # Process each chunk separately
+        all_sentences = []
+        for chunk in chunks:
+            if chunk.strip():
+                doc = nlp(chunk)
+                sentences = []
+                start = 0
+                
+                for i, token in enumerate(doc):
+                    if token.text == "," or token.text == "，":
+                        suitable_for_splitting = analyze_comma(start, doc, token)
+                        
+                        if suitable_for_splitting:
+                            sentences.append(doc[start:token.i].text.strip())
+                            rprint(f"[yellow]✂️  Split at comma: {doc[start:token.i][-4:]},| {doc[token.i + 1:][:4]}[/yellow]")
+                            start = token.i + 1
+                
+                sentences.append(doc[start:].text.strip())
+                all_sentences.extend(sentences)
+        
+        return all_sentences
+    else:
+        # Original logic for normal-sized text
+        doc = nlp(text)
+        sentences = []
+        start = 0
+        
+        for i, token in enumerate(doc):
+            if token.text == "," or token.text == "，":
+                suitable_for_splitting = analyze_comma(start, doc, token)
+                
+                if suitable_for_splitting:
+                    sentences.append(doc[start:token.i].text.strip())
+                    rprint(f"[yellow]✂️  Split at comma: {doc[start:token.i][-4:]},| {doc[token.i + 1:][:4]}[/yellow]")
+                    start = token.i + 1
+        
+        sentences.append(doc[start:].text.strip())
+        return sentences
 
 def split_by_comma_main(nlp):
 

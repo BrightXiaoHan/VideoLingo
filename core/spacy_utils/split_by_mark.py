@@ -7,6 +7,45 @@ from rich import print as rprint
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+def process_text_in_chunks(text, nlp, max_bytes=45000):
+    """Process text in chunks to avoid tokenizer limits, especially for Japanese."""
+    if nlp.lang == "ja":
+        # For Japanese, we need to be careful about byte limits
+        chunks = []
+        current_chunk = ""
+        current_bytes = 0
+        
+        # Split by sentences first if possible
+        temp_sentences = text.split('。')
+        
+        for sent in temp_sentences:
+            sent_with_period = sent + '。' if sent else ''
+            sent_bytes = len(sent_with_period.encode('utf-8'))
+            
+            if current_bytes + sent_bytes > max_bytes and current_chunk:
+                chunks.append(current_chunk.rstrip('。') + '。')
+                current_chunk = sent_with_period
+                current_bytes = sent_bytes
+            else:
+                current_chunk += sent_with_period
+                current_bytes += sent_bytes
+        
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        # Process each chunk
+        all_sentences = []
+        for chunk in chunks:
+            if chunk.strip():
+                doc = nlp(chunk)
+                all_sentences.extend([sent.text.strip() for sent in doc.sents])
+        
+        return all_sentences
+    else:
+        # For other languages, process normally
+        doc = nlp(text)
+        return [sent.text.strip() for sent in doc.sents]
+
 def split_by_mark(nlp):
     whisper_language = load_key("whisper.language")
     language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language # consider force english case
@@ -17,18 +56,23 @@ def split_by_mark(nlp):
     
     # join with joiner
     input_text = joiner.join(chunks.text.to_list())
-
-    doc = nlp(input_text)
-    assert doc.has_annotation("SENT_START")
+    
+    # Check text size and process accordingly
+    text_bytes = len(input_text.encode('utf-8'))
+    if nlp.lang == "ja" and text_bytes > 45000:
+        rprint(f"[yellow]⚠️ Large Japanese text detected ({text_bytes} bytes), processing in chunks...[/yellow]")
+        sentences_list = process_text_in_chunks(input_text, nlp)
+    else:
+        doc = nlp(input_text)
+        assert doc.has_annotation("SENT_START")
+        sentences_list = [sent.text.strip() for sent in doc.sents]
 
     # skip - and ...
     sentences_by_mark = []
     current_sentence = []
     
     # iterate all sentences
-    for sent in doc.sents:
-        text = sent.text.strip()
-        
+    for text in sentences_list:
         # check if the current sentence ends with - or ...
         if current_sentence and (
             text.startswith('-') or 
