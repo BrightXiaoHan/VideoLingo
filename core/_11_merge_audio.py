@@ -39,7 +39,10 @@ def adjust_timing_for_drift(new_sub_times, max_drift_correction=0.05):
     drift_threshold = 1200.0  # Begin corrections after 20 minutes of video
     
     # Get drift correction factor from config, or use default 3.0
-    drift_correction_factor = load_key("drift_correction_factor", 3.0)
+    try:
+        drift_correction_factor = load_key("drift_correction_factor")
+    except (KeyError, ValueError):
+        drift_correction_factor = 3.0
     
     # Calculate total video duration for scaling
     total_duration = new_sub_times[-1][1] if new_sub_times else 0
