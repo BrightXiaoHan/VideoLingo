@@ -78,8 +78,16 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str]):
     
     @except_handler("Error in split_align_subs")
     def process(i):
-        split_src = split_sentence(src_lines[i], num_parts=2).strip()
-        src_parts, tr_parts, tr_remerged = align_subs(src_lines[i], tr_lines[i], split_src)
+        # Ensure src_lines[i] and tr_lines[i] are strings
+        src_line = str(src_lines[i]) if src_lines[i] is not None else ""
+        tr_line = str(tr_lines[i]) if tr_lines[i] is not None else ""
+        
+        if not src_line or not tr_line:
+            console.print(f"[yellow]Warning: Empty line at index {i}, skipping split[/yellow]")
+            return
+            
+        split_src = split_sentence(src_line, num_parts=2).strip()
+        src_parts, tr_parts, tr_remerged = align_subs(src_line, tr_line, split_src)
         src_lines[i] = src_parts
         tr_lines[i] = tr_parts
         remerged_tr_lines[i] = tr_remerged
@@ -97,8 +105,9 @@ def split_for_sub_main():
     console.print("[bold green]🚀 Start splitting subtitles...[/bold green]")
     
     df = pd.read_excel(_4_2_TRANSLATION)
-    src = df['Source'].tolist()
-    trans = df['Translation'].tolist()
+    # Convert to string and handle NaN values
+    src = df['Source'].fillna('').astype(str).tolist()
+    trans = df['Translation'].fillna('').astype(str).tolist()
     
     subtitle_set = load_key("subtitle")
     MAX_SUB_LENGTH = subtitle_set["max_length"]
@@ -109,8 +118,9 @@ def split_for_sub_main():
         split_src, split_trans, remerged = split_align_subs(src.copy(), trans)
         
         # 检查是否所有字幕都符合长度要求
-        if all(len(src) <= MAX_SUB_LENGTH for src in split_src) and \
-           all(calc_len(tr) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in split_trans):
+        # Convert to string to handle any non-string values
+        if all(len(str(src)) <= MAX_SUB_LENGTH for src in split_src if src) and \
+           all(calc_len(str(tr)) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in split_trans if tr):
             break
         
         # 更新源数据继续下一轮分割
