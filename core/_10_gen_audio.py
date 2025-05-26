@@ -200,7 +200,51 @@ def merge_chunks(tasks_df: pd.DataFrame) -> pd.DataFrame:
                     last_times[-1][1] = chunk_end_time
                     tasks_df.at[index, 'new_sub_times'] = last_times
                 else:
-                    raise Exception(f"Chunk {chunk_start} to {index} exceeds the chunk end time {chunk_end_time:.2f} seconds with current time {cur_time:.2f} seconds")
+                    # Handle larger timing discrepancies
+                    time_diff = cur_time - chunk_end_time
+                    rprint(f"[red]⚠️ Chunk {chunk_start} to {index} exceeds by {time_diff:.3f}s (current: {cur_time:.2f}s, expected: {chunk_end_time:.2f}s)[/red]")
+                    
+                    # Try to adjust by speeding up all audio files in the chunk proportionally
+                    adjustment_factor = chunk_end_time / cur_time
+                    rprint(f"[yellow]🔧 Applying global adjustment factor: {adjustment_factor:.3f} to all audio in chunk[/yellow]")
+                    
+                    # Re-process all audio files in the chunk with adjusted speed
+                    adjusted_cur_time = chunk_start_time
+                    for i, row in chunk_df.iterrows():
+                        if i != 0 and keep_gaps:
+                            adjusted_cur_time += chunk_df.iloc[i-1]['gap']/speed_factor
+                        
+                        number = row['number']
+                        lines = eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
+                        new_sub_times = []
+                        
+                        for line_index, line in enumerate(lines):
+                            output_file = OUTPUT_FILE_TEMPLATE.format(f"{number}_{line_index}")
+                            
+                            # Re-read the audio and apply additional speed adjustment
+                            audio = AudioSegment.from_wav(output_file)
+                            original_duration = len(audio) / 1000  # Convert to seconds
+                            new_duration = original_duration * adjustment_factor
+                            
+                            # Apply speed adjustment
+                            adjusted_audio = audio._spawn(audio.raw_data, overrides={
+                                "frame_rate": int(audio.frame_rate / adjustment_factor)
+                            }).set_frame_rate(audio.frame_rate)
+                            
+                            # Trim to exact duration if needed
+                            if len(adjusted_audio) > new_duration * 1000:
+                                adjusted_audio = adjusted_audio[:int(new_duration * 1000)]
+                            
+                            adjusted_audio.export(output_file, format="wav")
+                            
+                            new_sub_times.append([adjusted_cur_time, adjusted_cur_time + new_duration])
+                            adjusted_cur_time += new_duration
+                        
+                        # Update the main DataFrame with adjusted times
+                        main_df_idx = tasks_df[tasks_df['number'] == row['number']].index[0]
+                        tasks_df.at[main_df_idx, 'new_sub_times'] = new_sub_times
+                    
+                    rprint(f"[green]✅ Chunk timing adjusted successfully[/green]")
             chunk_start = index+1
     
     rprint("[bold green]✅ Audio chunks processing completed![/bold green]")
