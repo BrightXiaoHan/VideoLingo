@@ -35,7 +35,9 @@ def convert_to_srt_format(start_time, end_time):
 
 def remove_punctuation(text):
     text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'[^\w\s]', '', text)
+    # For Japanese, Chinese, etc., don't remove all punctuation as it might be important for matching
+    # Only remove common punctuation that doesn't affect word boundaries
+    text = re.sub(r'[。、，．,!?！？\"\'\-\—\–]', '', text)
     return text.strip()
 
 def show_difference(str1, str2):
@@ -59,44 +61,132 @@ def show_difference(str1, str2):
 def get_sentence_timestamps(df_words, df_sentences):
     time_stamp_list = []
     
+    # Detect if we're dealing with Japanese/Chinese text
+    sample_text = str(df_sentences['Source'].iloc[0]) if not df_sentences.empty else ""
+    is_cjk = any('\u4e00' <= char <= '\u9fff' or '\u3040' <= char <= '\u309f' or '\u30a0' <= char <= '\u30ff' for char in sample_text)
+    
     # Build complete string and position mapping
     full_words_str = ''
     position_to_word_idx = {}
+    word_boundaries = []  # Store word boundaries for better matching
+    
+    # For CJK languages, also build a version without any spaces
+    full_words_str_no_space = ''
+    position_to_word_idx_no_space = {}
     
     for idx, word in enumerate(df_words['text']):
         clean_word = remove_punctuation(word.lower())
+        
+        # Regular version
         start_pos = len(full_words_str)
         full_words_str += clean_word
+        word_boundaries.append((start_pos, len(full_words_str), idx))
         for pos in range(start_pos, len(full_words_str)):
             position_to_word_idx[pos] = idx
+        
+        # No-space version for CJK
+        if is_cjk:
+            clean_word_no_space = clean_word.replace(' ', '')
+            start_pos_no_space = len(full_words_str_no_space)
+            full_words_str_no_space += clean_word_no_space
+            for pos in range(start_pos_no_space, len(full_words_str_no_space)):
+                position_to_word_idx_no_space[pos] = idx
     
     current_pos = 0
+    current_pos_no_space = 0
+    
     for idx, sentence in df_sentences['Source'].items():
         clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "")
         sentence_len = len(clean_sentence)
         
         match_found = False
-        while current_pos <= len(full_words_str) - sentence_len:
-            if full_words_str[current_pos:current_pos+sentence_len] == clean_sentence:
-                start_word_idx = position_to_word_idx[current_pos]
-                end_word_idx = position_to_word_idx[current_pos + sentence_len - 1]
+        
+        # For CJK, try matching in the no-space version first
+        if is_cjk and full_words_str_no_space:
+            search_text = full_words_str_no_space
+            search_pos = current_pos_no_space
+            pos_to_idx = position_to_word_idx_no_space
+        else:
+            search_text = full_words_str
+            search_pos = current_pos
+            pos_to_idx = position_to_word_idx
+        
+        # Try exact match first
+        while search_pos <= len(search_text) - sentence_len:
+            if search_text[search_pos:search_pos+sentence_len] == clean_sentence:
+                start_word_idx = pos_to_idx[search_pos]
+                end_word_idx = pos_to_idx[min(search_pos + sentence_len - 1, len(search_text) - 1)]
                 
                 time_stamp_list.append((
                     float(df_words['start'][start_word_idx]),
                     float(df_words['end'][end_word_idx])
                 ))
                 
-                current_pos += sentence_len
+                if is_cjk:
+                    current_pos_no_space = search_pos + sentence_len
+                else:
+                    current_pos = search_pos + sentence_len
                 match_found = True
                 break
-            current_pos += 1
+            search_pos += 1
+        
+        # If no exact match found, try fuzzy matching
+        if not match_found and search_pos > 0:
+            # Reset position and try with more flexible matching
+            search_pos = max(0, search_pos - sentence_len)
+            best_match_score = 0
+            best_match_pos = -1
+            
+            # Search in a window around the expected position
+            search_window = min(len(search_text) - sentence_len, search_pos + sentence_len * 2)
+            for pos in range(search_pos, search_window + 1):
+                if pos + sentence_len <= len(search_text):
+                    candidate = search_text[pos:pos+sentence_len]
+                    # Calculate similarity
+                    matches = sum(1 for a, b in zip(clean_sentence, candidate) if a == b)
+                    score = matches / sentence_len
+                    
+                    if score > best_match_score and score > 0.75:  # Lower threshold for CJK
+                        best_match_score = score
+                        best_match_pos = pos
+            
+            if best_match_pos >= 0:
+                start_word_idx = pos_to_idx[best_match_pos]
+                end_word_idx = pos_to_idx[min(best_match_pos + sentence_len - 1, len(search_text) - 1)]
+                
+                time_stamp_list.append((
+                    float(df_words['start'][start_word_idx]),
+                    float(df_words['end'][end_word_idx])
+                ))
+                
+                if is_cjk:
+                    current_pos_no_space = best_match_pos + sentence_len
+                else:
+                    current_pos = best_match_pos + sentence_len
+                match_found = True
+                console.print(f"[yellow]⚠️ Fuzzy match found for sentence with {best_match_score:.1%} similarity: {sentence[:30]}...[/yellow]")
             
         if not match_found:
-            print(f"\n⚠️ Warning: No exact match found for sentence: {sentence}")
+            print(f"\n⚠️ Warning: No match found for sentence: {sentence}")
             show_difference(clean_sentence, 
-                          full_words_str[current_pos:current_pos+len(clean_sentence)])
+                          full_words_str[current_pos:current_pos+len(clean_sentence)] if current_pos < len(full_words_str) else "")
             print("\nOriginal sentence:", df_sentences['Source'][idx])
-            raise ValueError("❎ No match found for sentence.")
+            print(f"Clean sentence to match: {clean_sentence}")
+            print(f"Search position: {current_pos}, Total length: {len(full_words_str)}")
+            
+            # Instead of raising error, use approximate timing
+            console.print(f"[yellow]Using approximate timing for unmatched sentence[/yellow]")
+            if time_stamp_list:
+                # Use the end time of the last sentence plus a gap
+                last_end = time_stamp_list[-1][1]
+                approx_duration = 2.0  # Default 2 seconds per sentence
+                time_stamp_list.append((last_end + 0.1, last_end + approx_duration))
+            else:
+                # First sentence, start from beginning
+                time_stamp_list.append((0.0, 2.0))
+            
+            # Continue with next sentence instead of raising error
+            # raise ValueError("❎ No match found for sentence.")
     
     return time_stamp_list
 
