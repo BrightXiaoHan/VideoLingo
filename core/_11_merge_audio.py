@@ -24,6 +24,59 @@ def load_and_flatten_data(excel_file):
     
     return df, lines, new_sub_times
 
+def adjust_timing_for_drift(new_sub_times, max_drift_correction=0.05):
+    """
+    Adjust subtitle timing to prevent drift in longer videos
+    
+    Args:
+        new_sub_times: List of [start_time, end_time] pairs
+        max_drift_correction: Maximum adjustment per segment (seconds)
+    
+    Returns:
+        Adjusted timing list
+    """
+    adjusted_times = []
+    drift_threshold = 1200.0  # Begin corrections after 20 minutes of video
+    
+    # Get drift correction factor from config, or use default 3.0
+    drift_correction_factor = load_key("drift_correction_factor", 3.0)
+    
+    # Calculate total video duration for scaling
+    total_duration = new_sub_times[-1][1] if new_sub_times else 0
+    
+    console.print(f"[bold blue]🔄 Applying drift correction for video duration: {total_duration:.2f} seconds[/bold blue]")
+    console.print(f"[bold blue]🔄 Drift correction will begin at: {drift_threshold:.2f} seconds ({drift_threshold/60:.1f} minutes)[/bold blue]")
+    console.print(f"[bold blue]🔄 Drift correction factor: {drift_correction_factor}[/bold blue]")
+    
+    max_correction = 0
+    for i, (start_time, end_time) in enumerate(new_sub_times):
+        # No correction before the threshold
+        if start_time <= drift_threshold:
+            adjusted_times.append([start_time, end_time])
+            continue
+            
+        # Calculate progressive correction factor based on position in video
+        # More correction applied as we get further into the video
+        position_factor = (start_time - drift_threshold) / (total_duration - drift_threshold) if total_duration > drift_threshold else 0
+        
+        # Apply increasing correction - starts small, grows larger later in video
+        correction = position_factor * position_factor * drift_correction_factor
+        max_correction = max(max_correction, correction)
+        
+        # Apply correction to both start and end times
+        adjusted_start = start_time - correction
+        adjusted_end = end_time - correction
+        
+        adjusted_times.append([adjusted_start, adjusted_end])
+    
+    # Log maximum applied correction
+    if max_correction > 0:
+        console.print(f"[bold green]✅ Maximum drift correction applied: {max_correction:.2f} seconds[/bold green]")
+    else:
+        console.print("[bold yellow]⚠️ No drift correction was needed[/bold yellow]")
+    
+    return adjusted_times
+
 def get_audio_files(df):
     """Generate a list of audio file paths"""
     audios = []
@@ -82,8 +135,11 @@ def merge_audio_segments(audios, new_sub_times, sample_rate):
     
     return merged_audio
 
-def create_srt_subtitle():
-    df, lines, new_sub_times = load_and_flatten_data(_8_1_AUDIO_TASK)
+def create_srt_subtitle(lines=None, adjusted_times=None):
+    if lines is None or adjusted_times is None:
+        df, lines, new_sub_times = load_and_flatten_data(_8_1_AUDIO_TASK)
+    else:
+        new_sub_times = adjusted_times
     
     with open(DUB_SUB_FILE, 'w', encoding='utf-8') as f:
         for i, ((start_time, end_time), line) in enumerate(zip(new_sub_times, lines), 1):
@@ -108,8 +164,11 @@ def merge_full_audio():
         audios = get_audio_files(df)
     console.print(f"[bold green]✅ Found {len(audios)} audio segments[/bold green]")
     
-    with console.status("[bold cyan]📝 Generating subtitle file...[/bold cyan]"):
-        create_srt_subtitle()
+    # Apply drift correction for longer videos
+    adjusted_sub_times = adjust_timing_for_drift(new_sub_times)
+    
+    with console.status("[bold cyan]📝 Generating subtitle file with adjusted timing...[/bold cyan]"):
+        create_srt_subtitle(lines, adjusted_sub_times)
     
     if not os.path.exists(audios[0]):
         console.print(f"[bold red]❌ Error: First audio file {audios[0]} does not exist![/bold red]")
@@ -119,7 +178,7 @@ def merge_full_audio():
     console.print(f"[bold green]✅ Sample rate: {sample_rate}Hz[/bold green]")
 
     console.print("[bold cyan]🔄 Starting audio merge process...[/bold cyan]")
-    merged_audio = merge_audio_segments(audios, new_sub_times, sample_rate)
+    merged_audio = merge_audio_segments(audios, adjusted_sub_times, sample_rate)
     
     with console.status("[bold cyan]💾 Exporting final audio file...[/bold cyan]"):
         merged_audio = merged_audio.set_frame_rate(16000).set_channels(1)
