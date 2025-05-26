@@ -96,8 +96,31 @@ def get_sentence_timestamps(df_words, df_sentences):
     current_pos_no_space = 0
     
     for idx, sentence in df_sentences['Source'].items():
+        # Handle non-string values (NaN, float, None, etc.)
+        if pd.isna(sentence) or sentence is None:
+            console.print(f"[yellow]Warning: Empty/NaN sentence at index {idx}, skipping[/yellow]")
+            # Add a placeholder timestamp
+            if time_stamp_list:
+                last_end = time_stamp_list[-1][1]
+                time_stamp_list.append((last_end, last_end + 0.1))
+            else:
+                time_stamp_list.append((0.0, 0.1))
+            continue
+        
+        # Convert to string
+        sentence = str(sentence)
         clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "")
         sentence_len = len(clean_sentence)
+        
+        if sentence_len == 0:
+            console.print(f"[yellow]Warning: Empty sentence after cleaning at index {idx}[/yellow]")
+            # Add a placeholder timestamp
+            if time_stamp_list:
+                last_end = time_stamp_list[-1][1]
+                time_stamp_list.append((last_end, last_end + 0.1))
+            else:
+                time_stamp_list.append((0.0, 0.1))
+            continue
         
         match_found = False
         
@@ -219,7 +242,27 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
 
     # Output subtitles 📜
     def generate_subtitle_string(df, columns):
-        return ''.join([f"{i+1}\n{row['timestamp']}\n{row[columns[0]].strip()}\n{row[columns[1]].strip() if len(columns) > 1 else ''}\n\n" for i, row in df.iterrows()]).strip()
+        subtitle_parts = []
+        for i, row in df.iterrows():
+            # Ensure all values are strings
+            timestamp = str(row['timestamp']) if 'timestamp' in row else ''
+            
+            # Get column values and ensure they are strings
+            col1_value = str(row[columns[0]]) if columns[0] in row and pd.notna(row[columns[0]]) else ''
+            col2_value = str(row[columns[1]]) if len(columns) > 1 and columns[1] in row and pd.notna(row[columns[1]]) else ''
+            
+            # Skip empty entries
+            if not timestamp or (not col1_value and not col2_value):
+                continue
+                
+            subtitle_entry = f"{i+1}\n{timestamp}\n{col1_value.strip()}"
+            if col2_value:
+                subtitle_entry += f"\n{col2_value.strip()}"
+            subtitle_entry += "\n\n"
+            
+            subtitle_parts.append(subtitle_entry)
+        
+        return ''.join(subtitle_parts).strip()
 
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -240,7 +283,15 @@ def clean_translation(x):
 def align_timestamp_main():
     df_text = pd.read_excel(_2_CLEANED_CHUNKS)
     df_text['text'] = df_text['text'].str.strip('"').str.strip()
+    
     df_translate = pd.read_excel(_5_SPLIT_SUB)
+    # Clean the data: handle NaN values
+    df_translate['Source'] = df_translate['Source'].fillna('').astype(str)
+    df_translate['Translation'] = df_translate['Translation'].fillna('').astype(str)
+    # Remove rows where both Source and Translation are empty
+    df_translate = df_translate[(df_translate['Source'] != '') | (df_translate['Translation'] != '')]
+    df_translate = df_translate.reset_index(drop=True)
+    
     df_translate['Translation'] = df_translate['Translation'].apply(clean_translation)
     
     align_timestamp(df_text, df_translate, SUBTITLE_OUTPUT_CONFIGS, _OUTPUT_DIR)
@@ -248,6 +299,12 @@ def align_timestamp_main():
 
     # for audio
     df_translate_for_audio = pd.read_excel(_5_REMERGED) # use remerged file to avoid unmatched lines when dubbing
+    # Clean the audio data as well
+    df_translate_for_audio['Source'] = df_translate_for_audio['Source'].fillna('').astype(str)
+    df_translate_for_audio['Translation'] = df_translate_for_audio['Translation'].fillna('').astype(str)
+    df_translate_for_audio = df_translate_for_audio[(df_translate_for_audio['Source'] != '') | (df_translate_for_audio['Translation'] != '')]
+    df_translate_for_audio = df_translate_for_audio.reset_index(drop=True)
+    
     df_translate_for_audio['Translation'] = df_translate_for_audio['Translation'].apply(clean_translation)
     
     align_timestamp(df_text, df_translate_for_audio, AUDIO_SUBTITLE_OUTPUT_CONFIGS, _AUDIO_DIR)
