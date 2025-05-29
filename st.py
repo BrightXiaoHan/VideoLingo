@@ -12,6 +12,7 @@ st.set_page_config(page_title="VideoLingo", page_icon="docs/logo.svg")
 
 SUB_VIDEO = "output/output_sub.mp4"
 DUB_VIDEO = "output/output_dub.mp4"
+LIP_SYNC_VIDEO = "output/output_lip_sync.mp4"
 
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
@@ -88,6 +89,7 @@ def audio_processing_section():
             if st.button(t("Archive to 'history'"), key="cleanup_in_audio_processing"):
                 cleanup()
                 st.rerun()
+            return True
 
 def process_audio():
     with st.spinner(t("Generate audio tasks")): 
@@ -105,6 +107,78 @@ def process_audio():
     st.success(t("Audio processing complete! 🎇"))
     st.balloons()
 
+def lip_sync_section():
+    st.header(t("d. Lip Synchronization"))
+    with st.container(border=True):
+        st.markdown(f"""
+        <p style='font-size: 20px;'>
+        {t("This stage applies lip synchronization to match mouth movements with the dubbed audio:")}
+        <p style='font-size: 20px;'>
+            1. {t("Setup Wav2Lip model and dependencies")}<br>
+            2. {t("Detect faces in video frames")}<br>
+            3. {t("Generate lip-synced mouth movements")}<br>
+            4. {t("Blend synchronized lips back to original video")}
+        """, unsafe_allow_html=True)
+        
+        # Show lip sync settings
+        col1, col2 = st.columns(2)
+        with col1:
+            enable_lip_sync = st.checkbox(
+                t("Enable Lip Synchronization"), 
+                value=load_key("enable_lip_sync"),
+                help=t("Apply lip sync to match mouth movements with dubbed audio")
+            )
+            update_key("enable_lip_sync", enable_lip_sync)
+        
+        with col2:
+            if enable_lip_sync:
+                resize_factor = st.slider(
+                    t("Quality vs Speed"), 
+                    min_value=0.5, 
+                    max_value=2.0, 
+                    value=load_key("lip_sync_resize_factor"),
+                    step=0.1,
+                    help=t("Lower values = better quality but slower processing")
+                )
+                update_key("lip_sync_resize_factor", resize_factor)
+        
+        if not os.path.exists(LIP_SYNC_VIDEO):
+            if not os.path.exists(DUB_VIDEO):
+                st.warning(t("⚠️ Please complete audio processing first before applying lip sync."))
+            elif enable_lip_sync:
+                if st.button(t("Start Lip Synchronization"), key="lip_sync_button"):
+                    process_lip_sync()
+                    st.rerun()
+            else:
+                st.info(t("💡 Enable lip synchronization above to start processing."))
+        else:
+            st.success(t("Lip synchronization is complete! 🎭"))
+            if load_key("burn_subtitles"):
+                st.video(LIP_SYNC_VIDEO)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(t("Regenerate Lip Sync"), key="regenerate_lip_sync"):
+                    if os.path.exists(LIP_SYNC_VIDEO):
+                        os.remove(LIP_SYNC_VIDEO)
+                    process_lip_sync()
+                    st.rerun()
+            
+            with col2:
+                if st.button(t("Archive to 'history'"), key="cleanup_in_lip_sync"):
+                    cleanup()
+                    st.rerun()
+
+def process_lip_sync():
+    with st.spinner(t("Setting up Wav2Lip models...")):
+        _13_lip_sync.apply_lip_sync()
+    
+    if os.path.exists(LIP_SYNC_VIDEO):
+        st.success(t("Lip synchronization complete! 🎭"))
+        st.balloons()
+    else:
+        st.error(t("Lip synchronization failed. Please check the logs."))
+
 def main():
     logo_col, _ = st.columns([1,1])
     with logo_col:
@@ -116,9 +190,14 @@ def main():
     with st.sidebar:
         page_setting()
         st.markdown(give_star_button, unsafe_allow_html=True)
+    
     download_video_section()
-    text_processing_section()
-    audio_processing_section()
+    text_completed = text_processing_section()
+    audio_completed = audio_processing_section()
+    
+    # Only show lip sync section if audio processing is complete
+    if audio_completed:
+        lip_sync_section()
 
 if __name__ == "__main__":
     main()

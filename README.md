@@ -29,13 +29,15 @@ Key features:
 
 - **🗣️ Dubbing with GPT-SoVITS, Azure, OpenAI, and more**
 
+- **🎭 Lip Synchronization with Wav2Lip technology**
+
 - 🚀 One-click startup and processing in Streamlit
 
 - 🌍 Multi-language support in Streamlit UI
 
 - 📝 Detailed logging with progress resumption
 
-Difference from similar projects: **Single-line subtitles only, superior translation quality, seamless dubbing experience**
+Difference from similar projects: **Single-line subtitles only, superior translation quality, seamless dubbing experience, and intelligent lip sync**
 
 ## 🎥 Demo
 
@@ -111,6 +113,16 @@ python install.py
 streamlit run st.py
 ```
 
+### Lip Sync Setup (Optional)
+
+To enable lip synchronization functionality:
+
+```bash
+python scripts/install_lip_sync.py
+```
+
+For detailed lip sync documentation, see: [Lip Sync README](/docs/LIP_SYNC_README.md)
+
 ### Docker
 Alternatively, you can use Docker (requires CUDA 12.4 and NVIDIA Driver version >550), see [Docker docs](/docs/pages/docs/docker.en-US.md):
 
@@ -141,11 +153,13 @@ For detailed installation, API configuration, and batch mode instructions, pleas
 
 5. **For now, cannot dub multiple characters separately**, as whisperX's speaker distinction capability is not sufficiently reliable.
 
+6. **Lip sync processing requires additional time and computational resources**, especially for longer videos. The quality of lip synchronization depends on the clarity of faces in the original video.
+
 ## 📄 License
 
 This project is licensed under the Apache 2.0 License. Special thanks to the following open source projects for their contributions:
 
-[whisperX](https://github.com/m-bain/whisperX), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [json_repair](https://github.com/mangiucugna/json_repair), [BELLE](https://github.com/LianjiaTech/BELLE)
+[whisperX](https://github.com/m-bain/whisperX), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [json_repair](https://github.com/mangiucugna/json_repair), [BELLE](https://github.com/LianjiaTech/BELLE), [Wav2Lip](https://github.com/Rudrabha/Wav2Lip)
 
 ## 📬 Contact Me
 

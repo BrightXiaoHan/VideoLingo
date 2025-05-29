@@ -130,9 +130,18 @@ min_subtitle_duration: 2.5 # Minimum subtitle duration, will be forcibly extende
 min_trim_duration: 3.5 # Subtitles shorter than this value won't be split
 tolerance: 1.5 # Allowed extension time to the next subtitle
 
+## ======================== Lip Sync Settings ======================== ##
+# Whether to enable lip synchronization after dubbing
+enable_lip_sync: false
 
+# *Lip sync resize factor for better results (0.5-2.0, lower = better quality but slower)
+lip_sync_resize_factor: 1.0
 
+# *Whether to disable face detection smoothing (may help with artifacts)
+lip_sync_no_smooth: false
 
+# *Face detection padding [top, bottom, left, right] to adjust detected face region
+lip_sync_pads: [0, 10, 0, 0]
 
 ## ======================== Additional settings ======================== ##
 
