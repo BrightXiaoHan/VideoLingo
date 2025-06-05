@@ -99,6 +99,15 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str]):
     src_lines = [item for sublist in src_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
     tr_lines = [item for sublist in tr_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
     
+    # Pad to same length if necessary
+    if len(src_lines) != len(tr_lines):
+        console.print(f"[red]Warning: after splitting, source has {len(src_lines)} lines and target has {len(tr_lines)} lines. Padding with None.[/red]")
+        max_len = max(len(src_lines), len(tr_lines))
+        if len(src_lines) < max_len:
+            src_lines += [None] * (max_len - len(src_lines))
+        if len(tr_lines) < max_len:
+            tr_lines += [None] * (max_len - len(tr_lines))
+    
     return src_lines, tr_lines, remerged_tr_lines
 
 def split_for_sub_main():
@@ -131,6 +140,13 @@ def split_for_sub_main():
         remerged += [None] * (len(src) - len(remerged))
     elif len(remerged) > len(src):
         src += [None] * (len(remerged) - len(src))
+    
+    # Ensure split_src and split_trans have same length
+    max_len = max(len(split_src), len(split_trans))
+    if len(split_src) < max_len:
+        split_src += [None] * (max_len - len(split_src))
+    if len(split_trans) < max_len:
+        split_trans += [None] * (max_len - len(split_trans))
     
     pd.DataFrame({'Source': split_src, 'Translation': split_trans}).to_excel(_5_SPLIT_SUB, index=False)
     pd.DataFrame({'Source': src, 'Translation': remerged}).to_excel(_5_REMERGED, index=False)
