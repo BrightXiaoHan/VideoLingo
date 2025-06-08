@@ -159,7 +159,7 @@ def run_wav2lip_inference(video_path, audio_path, output_path, resize_factor=1, 
     
     return True
 
-def apply_lip_sync():
+def apply_lip_sync(resize_factor=None):
     """Apply lip synchronization to the dubbed video"""
     
     if not load_key("enable_lip_sync"):
@@ -199,7 +199,8 @@ def apply_lip_sync():
     rprint(f"[bold cyan]Video info: {duration:.1f}s, {width}x{height}[/bold cyan]")
     
     # Determine optimal resize factor based on resolution and duration
-    resize_factor = load_key("lip_sync_resize_factor") or 1
+    if resize_factor is None:
+        resize_factor = load_key("lip_sync_resize_factor") or 1
     
     # Auto-adjust resize factor for high resolution or long videos
     if width > 1920 or height > 1080:
