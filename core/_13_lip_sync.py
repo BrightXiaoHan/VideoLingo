@@ -2,6 +2,7 @@ import os
 import subprocess
 import shutil
 from rich.console import Console
+from pathlib import Path
 
 from core._1_ytdlp import find_video_files
 from core.utils import *
@@ -14,62 +15,51 @@ console = Console()
 LIP_SYNC_VIDEO = "output/output_lip_sync.mp4"
 WAV2LIP_DIR = "_model_cache/Wav2Lip"
 WAV2LIP_CHECKPOINT = "_model_cache/Wav2Lip/checkpoints/wav2lip_gan.pth"
+WAV2LIP_VENV_DIR = "_model_cache/wav2lip_env"
+WAV2LIP_RUNNER = "_model_cache/run_wav2lip.py"
+
+def get_venv_python():
+    """Get the Python executable path from the virtual environment"""
+    venv_path = Path(WAV2LIP_VENV_DIR)
+    
+    if os.name == 'nt':  # Windows
+        python_exe = venv_path / "Scripts" / "python.exe"
+    else:  # Unix/Linux/macOS
+        python_exe = venv_path / "bin" / "python"
+    
+    return str(python_exe) if python_exe.exists() else None
+
+def check_wav2lip_installation():
+    """Check if Wav2Lip is properly installed in virtual environment"""
+    
+    # Check if virtual environment exists
+    venv_python = get_venv_python()
+    if not venv_python:
+        return False
+    
+    # Check if Wav2Lip directory exists
+    if not os.path.exists(WAV2LIP_DIR):
+        return False
+    
+    # Check if checkpoint exists
+    if not os.path.exists(WAV2LIP_CHECKPOINT):
+        return False
+    
+    # Check if runner script exists
+    if not os.path.exists(WAV2LIP_RUNNER):
+        return False
+    
+    return True
 
 def setup_wav2lip():
     """Setup Wav2Lip repository and models"""
-    if os.path.exists(WAV2LIP_DIR):
-        rprint("[bold green]Wav2Lip already installed.[/bold green]")
+    if check_wav2lip_installation():
+        rprint("[bold green]Wav2Lip already installed in virtual environment.[/bold green]")
         return True
     
-    rprint("[bold yellow]Setting up Wav2Lip...[/bold yellow]")
-    
-    # Clone Wav2Lip repository
-    cmd = [
-        "git", "clone", "https://github.com/Rudrabha/Wav2Lip.git", WAV2LIP_DIR
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        rprint(f"[bold red]Failed to clone Wav2Lip: {result.stderr}[/bold red]")
-        return False
-    
-    # Create checkpoints directory
-    os.makedirs(f"{WAV2LIP_DIR}/checkpoints", exist_ok=True)
-    
-    # Download models
-    rprint("[bold yellow]Downloading Wav2Lip models...[/bold yellow]")
-    
-    # Download Wav2Lip GAN model
-    wav2lip_url = "https://iiitaphyd-my.sharepoint.com/:u:/g/personal/radrabha_m_research_iiit_ac_in/EdjI7bZlgApMqsVoEUUXpLsBxqXbn5z8VTmoxp55YNDcIA?e=n9ljGW&download=1"
-    cmd = ["wget", "-O", WAV2LIP_CHECKPOINT, wav2lip_url]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        rprint("[bold yellow]Direct download failed, trying alternative method...[/bold yellow]")
-        # Alternative: use gdown for Google Drive links
-        cmd = ["pip", "install", "gdown"]
-        subprocess.run(cmd)
-        
-        # Use a working direct link
-        cmd = ["gdown", "1JYb65kQA079KBeHbsb_06h-cdQzfuv5R", "-O", WAV2LIP_CHECKPOINT]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    # Download face detection model
-    face_detection_path = f"{WAV2LIP_DIR}/face_detection/detection/sfd/s3fd.pth"
-    os.makedirs(os.path.dirname(face_detection_path), exist_ok=True)
-    
-    face_detection_url = "https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth"
-    cmd = ["wget", "-O", face_detection_path, face_detection_url]
-    subprocess.run(cmd)
-    
-    # Install requirements
-    requirements_path = f"{WAV2LIP_DIR}/requirements.txt"
-    if os.path.exists(requirements_path):
-        cmd = ["pip", "install", "-r", requirements_path]
-        subprocess.run(cmd)
-    
-    rprint("[bold green]Wav2Lip setup complete![/bold green]")
-    return True
+    rprint("[bold red]Wav2Lip not properly installed.[/bold red]")
+    rprint("[bold yellow]Please run: python scripts/install_lip_sync.py[/bold yellow]")
+    return False
 
 def get_video_info(video_path):
     """Get video information using ffprobe"""
@@ -133,6 +123,42 @@ def split_video_for_lip_sync(video_path, audio_path, chunk_duration=60):
     
     return chunks
 
+def run_wav2lip_inference(video_path, audio_path, output_path, resize_factor=1, no_smooth=False, pads=None):
+    """Run Wav2Lip inference using the virtual environment"""
+    
+    # Get virtual environment python
+    venv_python = get_venv_python()
+    if not venv_python:
+        rprint("[bold red]Virtual environment not found. Please run install_lip_sync.py first.[/bold red]")
+        return False
+    
+    # Prepare command arguments
+    args = [
+        "--checkpoint_path", "checkpoints/wav2lip_gan.pth",
+        "--face", os.path.abspath(video_path),
+        "--audio", os.path.abspath(audio_path),
+        "--outfile", os.path.abspath(output_path),
+        "--resize_factor", str(int(resize_factor))
+    ]
+    
+    # Add optional parameters
+    if no_smooth:
+        args.append("--nosmooth")
+    
+    if pads:
+        args.extend(["--pads"] + [str(p) for p in pads])
+    
+    # Run inference using the wrapper script
+    cmd = [venv_python, WAV2LIP_RUNNER] + args
+    
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        rprint(f"[bold red]Wav2Lip inference failed: {result.stderr}[/bold red]")
+        return False
+    
+    return True
+
 def apply_lip_sync():
     """Apply lip synchronization to the dubbed video"""
     
@@ -144,7 +170,7 @@ def apply_lip_sync():
     
     # Setup Wav2Lip if needed
     if not setup_wav2lip():
-        rprint("[bold red]Failed to setup Wav2Lip. Skipping lip sync.[/bold red]")
+        rprint("[bold red]Failed to setup Wav2Lip. Please run install_lip_sync.py first.[/bold red]")
         return
     
     # Get input files
@@ -194,55 +220,35 @@ def apply_lip_sync():
         process_in_chunks = False
     
     # Process each chunk
-    original_dir = os.getcwd()
-    
     chunk_outputs = []
     
     lip_sync_no_smooth = load_key("lip_sync_no_smooth")
     lip_sync_pads = load_key("lip_sync_pads")
 
-    os.chdir(WAV2LIP_DIR)
     for i, (video_chunk, audio_chunk, start_time) in enumerate(chunks):
         rprint(f"[bold yellow]Processing chunk {i+1}/{len(chunks)}...[/bold yellow]")
         
-        # Prepare paths relative to Wav2Lip directory
-        video_path = os.path.join(original_dir, video_chunk)
-        audio_path = os.path.join(original_dir, audio_chunk)
-        
         if process_in_chunks:
-            output_path = os.path.join(original_dir, f"output/temp_lip_sync_chunk_{i}.mp4")
+            output_path = f"output/temp_lip_sync_chunk_{i}.mp4"
         else:
-            output_path = os.path.join(original_dir, LIP_SYNC_VIDEO)
+            output_path = LIP_SYNC_VIDEO
         
-        # Run inference
-        cmd = [
-            "python", "inference.py",
-            "--checkpoint_path", "checkpoints/wav2lip_gan.pth",
-            "--face", video_path,
-            "--audio", audio_path,
-            "--outfile", output_path,
-            "--resize_factor", str(int(resize_factor))
-        ]
+        # Run inference using virtual environment
+        success = run_wav2lip_inference(
+            video_chunk, 
+            audio_chunk, 
+            output_path,
+            resize_factor=resize_factor,
+            no_smooth=lip_sync_no_smooth,
+            pads=lip_sync_pads
+        )
         
-        # Add optional parameters
-        if lip_sync_no_smooth:
-            cmd.append("--nosmooth")
-        
-        if lip_sync_pads:
-            cmd.extend(["--pads"] + [str(p) for p in lip_sync_pads])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            rprint(f"[bold red]Chunk {i+1} failed: {result.stderr}[/bold red]")
-            os.chdir(original_dir)
+        if not success:
+            rprint(f"[bold red]Chunk {i+1} failed[/bold red]")
             return
         
         if process_in_chunks:
             chunk_outputs.append(output_path)
-    
-    # Change back to original directory
-    os.chdir(original_dir)
     
     # Merge chunks if needed
     if process_in_chunks and chunk_outputs:
@@ -262,7 +268,7 @@ def apply_lip_sync():
         
         os.chdir("output")
         result = subprocess.run(cmd, capture_output=True, text=True)
-        os.chdir(original_dir)
+        os.chdir("..")
         
         if result.returncode != 0:
             rprint(f"[bold red]Failed to merge chunks: {result.stderr}[/bold red]")
