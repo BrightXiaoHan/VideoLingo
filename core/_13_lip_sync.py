@@ -9,14 +9,16 @@ from core.utils import *
 
 console = Console()
 
+abs_root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ------------
 # Lip Sync Configuration
 # ------------
-LIP_SYNC_VIDEO = "output/output_lip_sync.mp4"
-WAV2LIP_DIR = "_model_cache/Wav2Lip"
-WAV2LIP_CHECKPOINT = "_model_cache/Wav2Lip/checkpoints/wav2lip_gan.pth"
-WAV2LIP_VENV_DIR = "_model_cache/wav2lip_env"
-WAV2LIP_RUNNER = "_model_cache/run_wav2lip.py"
+LIP_SYNC_VIDEO = os.path.join(abs_root_path, "output/output_lip_sync.mp4")
+WAV2LIP_DIR = os.path.join(abs_root_path, "_model_cache/Wav2Lip")
+WAV2LIP_CHECKPOINT = os.path.join(abs_root_path, "_model_cache/Wav2Lip/checkpoints/wav2lip_gan.pth")
+WAV2LIP_VENV_DIR = os.path.join(abs_root_path, "_model_cache/wav2lip_env")
+WAV2LIP_RUNNER = os.path.join(abs_root_path, "_model_cache/run_wav2lip.py")
 
 def get_venv_python():
     """Get the Python executable path from the virtual environment"""
@@ -155,6 +157,8 @@ def run_wav2lip_inference(video_path, audio_path, output_path, resize_factor=1, 
     
     if result.returncode != 0:
         rprint(f"[bold red]Wav2Lip inference failed: {result.stderr}[/bold red]")
+        rprint(f"[bold red]Command: {' '.join(cmd)}[/bold red]")
+        rprint(f"{result.stdout}")
         return False
     
     return True

@@ -115,10 +115,11 @@ def install_dependencies_in_venv(python_exe, pip_exe):
         "scipy>=1.7.0",
         "gdown>=4.6.0",
         "opencv-python>=4.5.0",
-        "librosa>=0.8.0",
+        "librosa>=0.8.0,<0.11.0",  # Pin librosa version for compatibility
         "numpy>=1.19.0",
         "Pillow>=8.0.0",
-        "tqdm>=4.60.0"
+        "tqdm>=4.60.0",
+        "soundfile>=0.10.0"  # For audio file I/O
     ]
     
     for dep in other_dependencies:
@@ -264,9 +265,10 @@ from pathlib import Path
 
 def run_wav2lip_inference(args):
     """Run Wav2Lip inference in virtual environment"""
+    abs_path = os.path.dirname(os.path.abspath(__file__))
     
     # Get virtual environment python path
-    venv_path = Path("_model_cache/wav2lip_env")
+    venv_path = Path(abs_path, "_model_cache/wav2lip_env")
     if os.name == 'nt':  # Windows
         python_exe = venv_path / "Scripts" / "python.exe"
     else:  # Unix/Linux/macOS
@@ -277,7 +279,7 @@ def run_wav2lip_inference(args):
         return False
     
     # Change to Wav2Lip directory
-    wav2lip_dir = Path("_model_cache/Wav2Lip")
+    wav2lip_dir = Path(abs_path, "_model_cache/Wav2Lip")
     if not wav2lip_dir.exists():
         print("Error: Wav2Lip not found. Please run install_lip_sync.py first.")
         return False
