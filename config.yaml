@@ -7,33 +7,33 @@
 
 ## ======================== Basic Settings ======================== ##
 
-display_language: "zh-CN"
+display_language: "en"
 
 # API settings
 api:
-  key: 'your-api-key'
-  base_url: 'https://yunwu.ai'
-  model: 'gpt-4.1-2025-04-14'
-  llm_support_json: false
+  key: 'sk-fdfb748bf64941e8a92496f78560d724'
+  base_url: 'https://api.deepseek.com'
+  model: 'deepseek-chat'
+  llm_support_json: true
 # *Number of LLM multi-threaded accesses, set to 1 if using local LLM
 max_workers: 4
 
 # Language settings, written into the prompt, can be described in natural language
-target_language: '简体中文'
+target_language: 'English'
 
 # Whether to use Demucs for vocal separation before transcription
 demucs: true
 
 whisper:
   # ["large-v3", "large-v3-turbo"]. Note: for zh model will force to use Belle/large-v3
-  model: 'large-v3'
+  model: 'large-v3-turbo'
   # Whisper specified recognition language ISO 639-1
-  language: 'en'
+  language: 'ja'
   detected_language: 'en'
   # Whisper running mode ["local", "cloud", "elevenlabs"]. Specifies where to run, cloud uses 302.ai API
-  runtime: 'local'
+  runtime: 'cloud'
   # 302.ai API key
-  whisperX_302_api_key: 'your_302_api_key'
+  whisperX_302_api_key: 'sk-Oth0o5Lnc8gzVkJP5bhV0NmLN0P5UMBEy8MmcGHF8oCD4mla'
   # ElevenLabs API key (experimental)
   elevenlabs_api_key: 'your_elevenlabs_api_key'
 
@@ -41,7 +41,7 @@ whisper:
 burn_subtitles: true
 
 ## ======================== Advanced Settings ======================== ##
-# *🔬 h264_nvenc GPU acceleration for ffmpeg, make sure your GPU supports it
+# * h264_nvenc GPU acceleration for ffmpeg, make sure your GPU supports it
 ffmpeg_gpu: false
 
 # *Youtube settings
@@ -71,7 +71,7 @@ pause_before_translate: false
 
 ## ======================== Dubbing Settings ======================== ##
 # TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, fish_tts, edge_tts, custom_tts]
-tts_method: 'azure_tts'
+tts_method: 'openai_tts'
 
 # SiliconFlow FishTTS
 sf_fish_tts:
@@ -87,8 +87,8 @@ sf_fish_tts:
 
 # OpenAI TTS-1 API configuration, 302.ai API only
 openai_tts:
-  api_key: 'YOUR_302_API_KEY'
-  voice: 'alloy'
+  api_key: 'sk-Oth0o5Lnc8gzVkJP5bhV0NmLN0P5UMBEy8MmcGHF8oCD4mla'
+  voice: 'echo'
 
 # Azure configuration, 302.ai API only
 azure_tts:
@@ -109,7 +109,7 @@ sf_cosyvoice2:
 
 # Edge TTS configuration
 edge_tts:
-  voice: 'zh-CN-XiaoxiaoNeural'
+  voice: 'en-US-AndrewMultilingualNeural'
 
 # SoVITS configuration
 gpt_sovits:
@@ -130,6 +130,9 @@ min_subtitle_duration: 2.5 # Minimum subtitle duration, will be forcibly extende
 min_trim_duration: 3.5 # Subtitles shorter than this value won't be split
 tolerance: 1.5 # Allowed extension time to the next subtitle
 
+## ======================== Lip Sync Settings ======================== ##
+# Whether to enable lip synchronization after dubbing
+enable_lip_sync: true
 
 
 

@@ -151,6 +151,12 @@ def page_setting():
         
         elif select_tts == "f5tts":
             config_input("302ai API", "f5tts.302_api")
+    
+    with st.expander(t("Lip Sync Settings"), expanded=True):
+        enable_lip_sync = st.toggle(t("Enable Lip Synchronization"), value=load_key("enable_lip_sync"), help=t("Apply lip sync to dubbed videos using Easy-Wav2Lip"))
+        if enable_lip_sync != load_key("enable_lip_sync"):
+            update_key("enable_lip_sync", enable_lip_sync)
+            st.rerun()
         
 def check_api():
     try:

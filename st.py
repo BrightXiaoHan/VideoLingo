@@ -12,6 +12,7 @@ st.set_page_config(page_title="VideoLingo", page_icon="docs/logo.svg")
 
 SUB_VIDEO = "output/output_sub.mp4"
 DUB_VIDEO = "output/output_dub.mp4"
+LIPSYNC_VIDEO = "output/output_lipsync.mp4"
 
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
@@ -105,6 +106,63 @@ def process_audio():
     st.success(t("Audio processing complete! 🎇"))
     st.balloons()
 
+def lipsync_processing_section():
+    st.header(t("d. Lip Synchronization"))
+    with st.container(border=True):
+        st.markdown(f"""
+        <p style='font-size: 20px;'>
+        {t("This stage includes the following steps:")}
+        <p style='font-size: 20px;'>
+            1. {t("Face detection and video segmentation")}<br>
+            2. {t("Easy-Wav2Lip setup and model download")}<br>
+            3. {t("Lip sync processing for each segment")}<br>
+            4. {t("Merge processed segments")}
+        """, unsafe_allow_html=True)
+        
+        # Check if lipsync is enabled
+        if not load_key("enable_lip_sync"):
+            st.warning(t("Lip sync is disabled in config. Enable it in settings to use this feature."))
+            return
+        
+        # Check if dubbed video exists
+        if not os.path.exists(DUB_VIDEO):
+            st.warning(t("Please complete audio processing first before applying lip sync."))
+            return
+        
+        if not os.path.exists(LIPSYNC_VIDEO):
+            # Quality settings
+            col1, col2 = st.columns(2)
+            with col1:
+                resize_factor = st.slider(
+                    t("Quality vs Speed"), 
+                    min_value=0.5, 
+                    max_value=2.0, 
+                    value=1.0, 
+                    step=0.1,
+                    help=t("Lower values = faster processing, higher values = better quality")
+                )
+            
+            if st.button(t("Start Lip Sync Processing"), key="lipsync_processing_button"):
+                process_lipsync(resize_factor)
+                st.rerun()
+        else:
+            st.success(t("Lip sync processing is complete! 🎭"))
+            st.video(LIPSYNC_VIDEO)
+            if st.button(t("Archive to 'history'"), key="cleanup_in_lipsync_processing"):
+                cleanup()
+                st.rerun()
+
+def process_lipsync(resize_factor=1.0):
+    with st.spinner(t("Setting up Easy-Wav2Lip environment...")):
+        # This might take a while on first run
+        st.info(t("First-time setup may take several minutes to download models..."))
+    
+    with st.spinner(t("Applying lip synchronization...")):
+        _13_lip_sync.apply_lip_sync(resize_factor=resize_factor)
+    
+    st.success(t("Lip synchronization complete! 🎭"))
+    st.balloons()
+
 def main():
     logo_col, _ = st.columns([1,1])
     with logo_col:
@@ -119,6 +177,7 @@ def main():
     download_video_section()
     text_processing_section()
     audio_processing_section()
+    lipsync_processing_section()
 
 if __name__ == "__main__":
     main()
