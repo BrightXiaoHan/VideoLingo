@@ -29,6 +29,8 @@
     "SiliconFlow API Key": "SiliconFlow API密钥",
     "Mode Selection": "模式选择",
     "Preset": "预设",
+    "Voice Clone": "语音克隆",
+    "Voice clone mode will automatically use the first 10 seconds of your video as reference audio to create a custom voice model.": "语音克隆模式将自动使用视频的前10秒作为参考音频来创建自定义语音模型。",
     "Refer_stable": "稳定参考",
     "Refer_dynamic": "动态参考",
     "OpenAI Voice": "OpenAI语音",

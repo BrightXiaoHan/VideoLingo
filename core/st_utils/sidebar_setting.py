@@ -118,10 +118,29 @@ def page_setting():
 
         elif select_tts == "fish_tts":
             config_input("302ai API", "fish_tts.api_key")
-            fish_tts_character = st.selectbox(t("Fish TTS Character"), options=list(load_key("fish_tts.character_id_dict").keys()), index=list(load_key("fish_tts.character_id_dict").keys()).index(load_key("fish_tts.character")))
-            if fish_tts_character != load_key("fish_tts.character"):
-                update_key("fish_tts.character", fish_tts_character)
+            
+            # Add mode selection dropdown
+            mode_options = {
+                "preset": t("Preset"),
+                "clone": t("Voice Clone")
+            }
+            selected_mode = st.selectbox(
+                t("Mode Selection"),
+                options=list(mode_options.keys()),
+                format_func=lambda x: mode_options[x],
+                index=list(mode_options.keys()).index(load_key("fish_tts.mode")) if load_key("fish_tts.mode") in mode_options.keys() else 0
+            )
+            if selected_mode != load_key("fish_tts.mode"):
+                update_key("fish_tts.mode", selected_mode)
                 st.rerun()
+                
+            if selected_mode == "preset":
+                fish_tts_character = st.selectbox(t("Fish TTS Character"), options=list(load_key("fish_tts.character_id_dict").keys()), index=list(load_key("fish_tts.character_id_dict").keys()).index(load_key("fish_tts.character")))
+                if fish_tts_character != load_key("fish_tts.character"):
+                    update_key("fish_tts.character", fish_tts_character)
+                    st.rerun()
+            elif selected_mode == "clone":
+                st.info(t("Voice clone mode will automatically use the first 10 seconds of your video as reference audio to create a custom voice model."))
 
         elif select_tts == "azure_tts":
             config_input("302ai API", "azure_tts.api_key")

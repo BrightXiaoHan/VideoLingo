@@ -29,6 +29,8 @@
     "SiliconFlow API Key": "SiliconFlow API Key",
     "Mode Selection": "Mode Selection",
     "Preset": "Preset",
+    "Voice Clone": "Voice Clone",
+    "Voice clone mode will automatically use the first 10 seconds of your video as reference audio to create a custom voice model.": "Voice clone mode will automatically use the first 10 seconds of your video as reference audio to create a custom voice model.",
     "Refer_stable": "Refer_stable",
     "Refer_dynamic": "Refer_dynamic",
     "OpenAI Voice": "OpenAI Voice",

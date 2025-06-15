@@ -1,40 +1,296 @@
+import os
+import time
+import uuid
+import hashlib
 import requests
+from pathlib import Path
+from pydub import AudioSegment
+from core._1_ytdlp import find_video_files
+from core.asr_backend.audio_preprocess import get_audio_duration
 from core.utils import *
-import json
+
+# ------------
+# 302.ai Fish Audio API endpoints
+# ------------
+TTS_URL = "https://api.302.ai/fish-audio/v1/tts"
+MODEL_CREATE_URL = "https://api.302.ai/fish-audio/model"
+MODEL_GET_URL = "https://api.302.ai/fish-audio/model"
+
+REFER_MAX_LENGTH = 90
 
 @except_handler("Failed to generate audio using 302.ai Fish TTS", retry=3, delay=1)
-def fish_tts(text: str, save_as: str) -> bool:
-    """302.ai Fish TTS conversion"""
+def fish_tts_basic(text: str, save_as: str, reference_id: str) -> bool:
+    """Basic 302.ai Fish TTS conversion with preset voice"""
     API_KEY = load_key("fish_tts.api_key")
-    character = load_key("fish_tts.character")
-    refer_id = load_key("fish_tts.character_id_dict")[character]
     
-    url = "https://api.302.ai/fish-audio/v1/tts"
-    payload = json.dumps({
+    payload = {
         "text": text,
-        "reference_id": refer_id,
+        "reference_id": reference_id,
         "chunk_length": 200,
         "normalize": True,
         "format": "wav",
         "latency": "normal"
-    })
+    }
     
-    headers = {'Authorization': f'Bearer {API_KEY}', 'Content-Type': 'application/json'}
+    headers = {
+        'Authorization': f'Bearer {API_KEY}', 
+        'model': 'speech-1.6',
+        'Content-Type': 'application/json'
+    }
     
-    response = requests.post(url, headers=headers, data=payload)
+    response = requests.post(TTS_URL, json=payload, headers=headers)
     response.raise_for_status()
-    response_data = response.json()
     
-    if "url" in response_data:
-        audio_response = requests.get(response_data["url"])
-        audio_response.raise_for_status()
-        
+    # Check if response contains audio URL or direct audio content
+    content_type = response.headers.get('content-type', '')
+    if 'application/json' in content_type:
+        # Response contains JSON with audio URL
+        response_data = response.json()
+        if "url" in response_data:
+            audio_response = requests.get(response_data["url"])
+            audio_response.raise_for_status()
+            
+            with open(save_as, "wb") as f:
+                f.write(audio_response.content)
+        else:
+            print("Request failed:", response_data)
+            return False
+    else:
+        # Response contains direct audio content
         with open(save_as, "wb") as f:
-            f.write(audio_response.content)
-        return True
+            f.write(response.content)
     
-    print("Request failed:", response_data)
+    print(f"Audio saved to {save_as}")
+    return True
+
+@except_handler("Failed to create voice model", retry=2, delay=2)
+def create_voice_model(audio_path: str, title: str, description: str = "") -> str:
+    """Create a voice model using 302.ai Fish Audio API"""
+    API_KEY = load_key("fish_tts.api_key")
+    
+    if not Path(audio_path).exists():
+        raise FileNotFoundError(f"Audio file not found at {audio_path}")
+    
+    # Prepare multipart form data
+    files = {
+        'voices': ('reference.wav', open(audio_path, 'rb'), 'audio/wav'),
+    }
+    
+    data = {
+        'visibility': 'private',
+        'type': 'tts',
+        'title': title,
+        'description': description,
+        'train_mode': 'fast',
+        'enhance_audio_quality': 'false'
+    }
+    
+    headers = {
+        'Authorization': f'Bearer {API_KEY}'
+    }
+    
+    print(f"Creating voice model: {title}")
+    response = requests.post(MODEL_CREATE_URL, files=files, data=data, headers=headers)
+    
+    # Close file handle
+    files['voices'][1].close()
+    
+    if response.status_code == 200:
+        response_data = response.json()
+        model_id = response_data.get('id')
+        print(f"Successfully created voice model: {model_id}")
+        return model_id
+    else:
+        print(f"Failed to create voice model: {response.status_code}")
+        print(f"Response: {response.text}")
+        raise Exception(f"Failed to create voice model: {response.status_code}")
+
+@except_handler("Failed to get model status", retry=3, delay=2)
+def get_model_status(model_id: str) -> dict:
+    """Get model training status"""
+    API_KEY = load_key("fish_tts.api_key")
+    
+    headers = {
+        'Authorization': f'Bearer {API_KEY}'
+    }
+    
+    response = requests.get(f"{MODEL_GET_URL}/{model_id}", headers=headers)
+    response.raise_for_status()
+    
+    return response.json()
+
+def wait_for_model_ready(model_id: str, max_wait_time: int = 300) -> bool:
+    """Wait for model training to complete"""
+    print(f"Waiting for model {model_id} to be ready...")
+    start_time = time.time()
+    
+    while time.time() - start_time < max_wait_time:
+        status_data = get_model_status(model_id)
+        status = status_data.get('status', 'unknown')
+        
+        print(f"Model status: {status}")
+        
+        if status == 'trained':
+            print("Model training completed!")
+            return True
+        elif status == 'failed':
+            print("Model training failed!")
+            return False
+        
+        time.sleep(10)  # Wait 10 seconds before checking again
+    
+    print("Model training timeout!")
     return False
+
+@except_handler("Failed to merge audio")
+def merge_audio(files, output):
+    """Merge audio files with brief silence between them"""
+    combined = AudioSegment.empty()
+    silence = AudioSegment.silent(duration=100)  # 100ms silence
+    
+    for file in files:
+        if Path(file).exists():
+            audio = AudioSegment.from_wav(file)
+            combined += audio + silence
+    
+    if len(combined) == 0:
+        print("No valid audio files to merge")
+        return False
+    
+    # Export the combined file
+    combined.export(output, format="wav", parameters=["-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1"])
+    
+    if os.path.getsize(output) == 0:
+        print("Output file size is 0")
+        return False
+        
+    print("Successfully merged audio files")
+    return True
+
+def get_ref_audio(task_df):
+    """Get reference audio and text for voice cloning"""
+    print("Starting reference audio selection process...")
+    
+    duration = 0
+    selected = []
+    combined_text = ""
+    found_first = False
+    
+    for _, row in task_df.iterrows():
+        current_text = row['origin']
+        
+        # If no valid record has been found yet
+        if not found_first:
+            if len(current_text) <= REFER_MAX_LENGTH:
+                selected.append(row)
+                combined_text = current_text
+                duration += row['duration']
+                found_first = True
+                print(f"Found first valid row: {current_text[:50]}...")
+            else:
+                print(f"Skipping long row: {current_text[:50]}... ({len(current_text)} chars)")
+            continue
+            
+        # Check subsequent rows
+        new_text = combined_text + " " + current_text
+        if len(new_text) > REFER_MAX_LENGTH:
+            break
+            
+        selected.append(row)
+        combined_text = new_text
+        duration += row['duration']
+        print(f"Added row: {current_text[:50]}...")
+        
+        if duration > 10:  # Limit to 10 seconds
+            break
+    
+    if not selected:
+        print(f"No valid segments found (all texts exceed {REFER_MAX_LENGTH} characters)")
+        return None, None
+        
+    print(f"Selected {len(selected)} segments, total duration: {duration:.2f}s")
+    
+    # Get audio files
+    audio_files = [f"{_AUDIO_REFERS_DIR}/{row['number']}.wav" for row in selected]
+    print(f"Audio files to merge: {audio_files}")
+    
+    combined_audio = f"{_AUDIO_REFERS_DIR}/combined_reference.wav"
+    success = merge_audio(audio_files, combined_audio)
+    
+    if not success:
+        print("Error: Failed to merge audio files")
+        return None, None
+        
+    print(f"Successfully created combined audio: {combined_audio}")
+    print(f"Final combined text: {combined_text} | Length: {len(combined_text)}")
+    
+    return combined_audio, combined_text
+
+def fish_tts_for_videolingo(text: str, save_as: str, number: int, task_df) -> bool:
+    """Main function for VideoLingo integration with voice cloning support"""
+    fish_set = load_key("fish_tts")
+    mode = fish_set.get("mode", "preset")
+    
+    if mode == "preset":
+        # Use preset voice
+        character = fish_set["character"]
+        reference_id = fish_set["character_id_dict"][character]
+        return fish_tts_basic(text, save_as, reference_id)
+        
+    elif mode == "clone":
+        # Use voice cloning
+        video_file = find_video_files()
+        model_name = hashlib.md5(video_file.encode()).hexdigest()[:8]
+        print(f"Using model name: {model_name}")
+        
+        stored_model_name = load_key("fish_tts.custom_model_name")
+        
+        if stored_model_name != model_name:
+            # Need to create new model
+            print("Creating new voice model...")
+            
+            # Get reference audio and text
+            ref_audio, ref_text = get_ref_audio(task_df)
+            if ref_audio is None or ref_text is None:
+                print("Failed to get reference audio, falling back to preset mode")
+                character = fish_set["character"]
+                reference_id = fish_set["character_id_dict"][character]
+                return fish_tts_basic(text, save_as, reference_id)
+            
+            # Create voice model
+            model_id = create_voice_model(
+                audio_path=ref_audio,
+                title=f"VideoLingo_Clone_{model_name}",
+                description=f"Voice clone for video: {video_file}"
+            )
+            
+            # Wait for model to be ready
+            if not wait_for_model_ready(model_id):
+                print("Model training failed or timeout, falling back to preset mode")
+                character = fish_set["character"]
+                reference_id = fish_set["character_id_dict"][character]
+                return fish_tts_basic(text, save_as, reference_id)
+            
+            # Save model info
+            update_key("fish_tts.custom_model_id", model_id)
+            update_key("fish_tts.custom_model_name", model_name)
+        else:
+            # Use existing model
+            model_id = load_key("fish_tts.custom_model_id")
+            print(f"Using existing model: {model_id}")
+        
+        # Generate TTS with cloned voice
+        return fish_tts_basic(text, save_as, model_id)
+    
+    else:
+        raise ValueError(f"Invalid mode: {mode}. Choose 'preset' or 'clone'")
+
+def fish_tts(text: str, save_as: str) -> bool:
+    """Legacy function for backward compatibility"""
+    fish_set = load_key("fish_tts")
+    character = fish_set["character"]
+    reference_id = fish_set["character_id_dict"][character]
+    return fish_tts_basic(text, save_as, reference_id)
 
 if __name__ == '__main__':
     fish_tts("Hi! Welcome to VideoLingo!", "test.wav")
