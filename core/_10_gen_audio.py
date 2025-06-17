@@ -84,13 +84,9 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
         # warm up for first 5 rows
         warmup_size = min(WARMUP_SIZE, len(tasks_df))
         for _, row in tasks_df.head(warmup_size).iterrows():
-            try:
-                number, real_dur = process_row(row, tasks_df)
-                tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
-                progress.advance(task)
-            except Exception as e:
-                rprint(f"[red]❌ Error in warmup: {str(e)}[/red]")
-                raise e
+            number, real_dur = process_row(row, tasks_df)
+            tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
+            progress.advance(task)
         
         # for gpt_sovits, do not use parallel to avoid mistakes
         max_workers = load_key("max_workers") if load_key("tts_method") != "gpt_sovits" else 1
