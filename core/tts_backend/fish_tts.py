@@ -12,19 +12,25 @@ from core.utils.models import _AUDIO_REFERS_DIR
 from pydub import AudioSegment
 
 # ------------
-# 302.ai Fish Audio API endpoints
+# Fish Audio API endpoints - now configurable
 # ------------
-TTS_URL = "https://api.302.ai/fish-audio/v1/tts"
-MODEL_CREATE_URL = "https://api.302.ai/fish-audio/model"
-MODEL_GET_URL = "https://api.302.ai/fish-audio/model"
+def get_api_urls():
+    """Get API URLs based on configuration"""
+    base_url = load_key("fish_tts.base_url", "https://api.302.ai")
+    return {
+        "tts": f"{base_url}/fish-audio/v1/tts",
+        "model_create": f"{base_url}/fish-audio/model",
+        "model_get": f"{base_url}/fish-audio/model"
+    }
 
 REFER_MAX_LENGTH = 90
 
 
-@except_handler("Failed to generate audio using 302.ai Fish TTS", retry=3, delay=1)
+@except_handler("Failed to generate audio using Fish TTS", retry=3, delay=1)
 def fish_tts_basic(text: str, save_as: str, reference_id: str) -> bool:
-    """Basic 302.ai Fish TTS conversion with preset voice"""
+    """Basic Fish TTS conversion with preset voice"""
     API_KEY = load_key("fish_tts.api_key")
+    urls = get_api_urls()
 
     payload = {
         "text": text,
@@ -42,7 +48,7 @@ def fish_tts_basic(text: str, save_as: str, reference_id: str) -> bool:
     }
 
     print(payload)
-    response = requests.post(TTS_URL, json=payload, headers=headers)
+    response = requests.post(urls["tts"], json=payload, headers=headers)
     response.raise_for_status()
 
     # Check if response contains audio URL or direct audio content
@@ -61,8 +67,9 @@ def fish_tts_basic(text: str, save_as: str, reference_id: str) -> bool:
 
 @except_handler("Failed to create voice model", retry=2, delay=2)
 def create_voice_model(audio_path: str, title: str, description: str = "") -> str:
-    """Create a voice model using 302.ai Fish Audio API"""
+    """Create a voice model using Fish Audio API"""
     API_KEY = load_key("fish_tts.api_key")
+    urls = get_api_urls()
 
     if not Path(audio_path).exists():
         raise FileNotFoundError(f"Audio file not found at {audio_path}")
@@ -84,7 +91,7 @@ def create_voice_model(audio_path: str, title: str, description: str = "") -> st
     headers = {"Authorization": f"Bearer {API_KEY}"}
 
     print(f"Creating voice model: {title}")
-    response = requests.post(MODEL_CREATE_URL, files=files, data=data, headers=headers)
+    response = requests.post(urls["model_create"], files=files, data=data, headers=headers)
 
     # Close file handle
     files["voices"][1].close()
@@ -104,10 +111,11 @@ def create_voice_model(audio_path: str, title: str, description: str = "") -> st
 def get_model_status(model_id: str) -> dict:
     """Get model training status"""
     API_KEY = load_key("fish_tts.api_key")
+    urls = get_api_urls()
 
     headers = {"Authorization": f"Bearer {API_KEY}"}
 
-    response = requests.get(f"{MODEL_GET_URL}", headers=headers)
+    response = requests.get(urls["model_get"], headers=headers)
     response.raise_for_status()
 
     response_json = response.json()
