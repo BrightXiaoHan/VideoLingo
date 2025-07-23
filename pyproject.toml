@@ -1,0 +1,27 @@
+[project]
+name = "videolingo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "autocorrect-py>=2.14.0",
+    "edge-tts>=7.0.2",
+    "g2p-en>=2.1.0",
+    "json-repair>=0.47.8",
+    "librosa>=0.11.0",
+    "openai>=1.97.1",
+    "opencv-python>=4.12.0.88",
+    "pandas>=2.3.1",
+    "pyaudio>=0.2.14",
+    "pydub>=0.25.1",
+    "pypinyin>=0.55.0",
+    "rich>=14.0.0",
+    "ruamel-yaml>=0.18.14",
+    "soundfile>=0.13.1",
+    "spacy>=3.8.7",
+    "syllables>=1.1.1",
+    "torch>=2.7.1",
+    "webrtcvad>=2.0.10",
+    "whisperx>=3.4.2",
+]
