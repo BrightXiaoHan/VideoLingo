@@ -7,33 +7,33 @@
 
 ## ======================== Basic Settings ======================== ##
 
-display_language: "zh-CN"
+display_language: "en"
 
 # API settings
 api:
-  key: 'your-api-key'
-  base_url: 'https://yunwu.ai'
-  model: 'gpt-4.1-2025-04-14'
-  llm_support_json: false
+  key: 'sk-fdfb748bf64941e8a92496f78560d724'
+  base_url: 'https://api.deepseek.com'
+  model: 'deepseek-chat'
+  llm_support_json: true
 # *Number of LLM multi-threaded accesses, set to 1 if using local LLM
 max_workers: 4
 
 # Language settings, written into the prompt, can be described in natural language
-target_language: '简体中文'
+target_language: 'English'
 
 # Whether to use Demucs for vocal separation before transcription
 demucs: true
 
 whisper:
   # ["large-v3", "large-v3-turbo"]. Note: for zh model will force to use Belle/large-v3
-  model: 'large-v3'
+  model: 'large-v3-turbo'
   # Whisper specified recognition language ISO 639-1
-  language: 'en'
+  language: 'ja'
   detected_language: 'en'
   # Whisper running mode ["local", "cloud", "elevenlabs"]. Specifies where to run, cloud uses 302.ai API
-  runtime: 'local'
+  runtime: 'cloud'
   # 302.ai API key
-  whisperX_302_api_key: 'your_302_api_key'
+  whisperX_302_api_key: 'sk-HuYslTzuxjFEmC5F0MeOZCTzEXeedJ913SsmzUS13Gq9qt5e'
   # ElevenLabs API key (experimental)
   elevenlabs_api_key: 'your_elevenlabs_api_key'
 
@@ -41,7 +41,7 @@ whisper:
 burn_subtitles: true
 
 ## ======================== Advanced Settings ======================== ##
-# *🔬 h264_nvenc GPU acceleration for ffmpeg, make sure your GPU supports it
+# * h264_nvenc GPU acceleration for ffmpeg, make sure your GPU supports it
 ffmpeg_gpu: false
 
 # *Youtube settings
@@ -70,8 +70,8 @@ reflect_translate: true
 pause_before_translate: false
 
 ## ======================== Dubbing Settings ======================== ##
-# TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, fish_tts, edge_tts, custom_tts]
-tts_method: 'azure_tts'
+# TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, fish_tts, edge_tts, coqui_tts, custom_tts]
+tts_method: 'coqui_tts'
 
 # SiliconFlow FishTTS
 sf_fish_tts:
@@ -87,8 +87,8 @@ sf_fish_tts:
 
 # OpenAI TTS-1 API configuration, 302.ai API only
 openai_tts:
-  api_key: 'YOUR_302_API_KEY'
-  voice: 'alloy'
+  api_key: 'sk-Oth0o5Lnc8gzVkJP5bhV0NmLN0P5UMBEy8MmcGHF8oCD4mla'
+  voice: 'echo'
 
 # Azure configuration, 302.ai API only
 azure_tts:
@@ -97,17 +97,17 @@ azure_tts:
 
 # FishTTS configuration, 302.ai API only
 fish_tts:
-  api_key: 'YOUR_302_API_KEY'
-  # Mode selection: preset, clone
-  mode: 'preset'
+  api_key: 'sk-Oth0o5Lnc8gzVkJP5bhV0NmLN0P5UMBEy8MmcGHF8oCD4mla'
+  base_url: 'https://api.302.ai'
+  mode: 'clone'
   # For preset mode
   character: 'AD学姐'
   character_id_dict:
     'AD学姐': '7f92f8afb8ec43bf81429cc1c9199cb1'
     '丁真': '54a5170264694bfc8e9ad98df7bd89c3'
   # *For clone mode, don't set manually
-  custom_model_id: ''
-  custom_model_name: ''
+  custom_model_id: 'ea5d9ad9e7364b7187ccf0cc006b9753'
+  custom_model_name: 'bc01bcb3'
 
 # SiliconFlow CosyVoice2 Clone
 sf_cosyvoice2:
@@ -115,7 +115,22 @@ sf_cosyvoice2:
 
 # Edge TTS configuration
 edge_tts:
-  voice: 'zh-CN-XiaoxiaoNeural'
+  voice: 'en-US-AndrewMultilingualNeural'
+
+# Coqui TTS configuration
+coqui_tts:
+  # Model name from Coqui TTS model list
+  model: 'tts_models/multilingual/multi-dataset/xtts_v2'
+  # Language code (e.g., 'en', 'es', 'fr', 'de', etc.)
+  language: 'en'
+  # Mode: 'single' for single speaker, 'clone' for voice cloning from video
+  mode: 'clone'
+  # Speaker name for multi-speaker models (optional, only used in single mode)
+  speaker: null
+  # *Cached video hash, don't set manually
+  cached_video: ''
+  # *Reference audio path, don't set manually
+  reference_audio: ''
 
 # SoVITS configuration
 gpt_sovits:
@@ -136,6 +151,9 @@ min_subtitle_duration: 2.5 # Minimum subtitle duration, will be forcibly extende
 min_trim_duration: 3.5 # Subtitles shorter than this value won't be split
 tolerance: 1.5 # Allowed extension time to the next subtitle
 
+## ======================== Lip Sync Settings ======================== ##
+# Whether to enable lip synchronization after dubbing
+enable_lip_sync: true
 
 
 
