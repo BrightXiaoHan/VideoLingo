@@ -16,7 +16,7 @@ from pydub import AudioSegment
 # ------------
 def get_api_urls():
     """Get API URLs based on configuration"""
-    base_url = load_key("fish_tts.base_url", "https://api.302.ai")
+    base_url = load_key("fish_tts.base_url")
     return {
         "tts": f"{base_url}/fish-audio/v1/tts",
         "model_create": f"{base_url}/fish-audio/model",
