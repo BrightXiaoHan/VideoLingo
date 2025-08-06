@@ -15,11 +15,12 @@ def cosyvoice_tts_for_videolingo(text, save_as, number, task_df):
     API_KEY = load_key("sf_cosyvoice2.api_key")
     # 设置参考音频路径
     current_dir = Path.cwd()
-    ref_audio_path = current_dir / f"output/audio/refers/{number}.wav"
+    from core.utils.models import get_output_dir
+    ref_audio_path = current_dir / f"{get_output_dir()}/audio/refers/{number}.wav"
     
     # 如果参考音频不存在，使用第一个音频作为备选
     if not ref_audio_path.exists():
-        ref_audio_path = current_dir / "output/audio/refers/1.wav"
+        ref_audio_path = current_dir / f"{get_output_dir()}/audio/refers/1.wav"
         if not ref_audio_path.exists():
             try:
                 from core._9_refer_audio import extract_refer_audio_main

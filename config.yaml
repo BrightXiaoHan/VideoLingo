@@ -106,8 +106,8 @@ fish_tts:
     'AD学姐': '7f92f8afb8ec43bf81429cc1c9199cb1'
     '丁真': '54a5170264694bfc8e9ad98df7bd89c3'
   # *For clone mode, don't set manually
-  custom_model_id: 'c76bf3e5f71f4444ae304b926db026f8'
-  custom_model_name: '09f77131'
+  custom_model_id: '8fad117e624c44b2b7e2238bd30ccf7d'
+  custom_model_name: '533773fc'
 
 # SiliconFlow CosyVoice2 Clone
 sf_cosyvoice2:

@@ -74,7 +74,7 @@ def split_extremely_long_sentence(doc):
 
 
 def split_long_by_root_main(nlp):
-    with open(SPLIT_BY_CONNECTOR_FILE, "r", encoding="utf-8") as input_file:
+    with open(SPLIT_BY_CONNECTOR_FILE(), "r", encoding="utf-8") as input_file:
         sentences = input_file.readlines()
 
     all_split_sentences = []
@@ -141,7 +141,7 @@ def split_long_by_root_main(nlp):
             output_file.write(sentence + "\n")
 
     # delete the original file
-    os.remove(SPLIT_BY_CONNECTOR_FILE)   
+    os.remove(SPLIT_BY_CONNECTOR_FILE())   
 
     rprint(f"[green]💾 Long sentences split by root saved to →  {_3_1_SPLIT_BY_NLP}[/green]")
 

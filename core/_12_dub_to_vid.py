@@ -12,9 +12,16 @@ from core.utils.models import *
 
 console = Console()
 
-DUB_VIDEO = "output/output_dub.mp4"
-DUB_SUB_FILE = 'output/dub.srt'
-DUB_AUDIO = 'output/dub.mp3'
+from core.utils.models import get_output_dir
+
+def _get_dub_paths():
+    """Get dynamic dub file paths"""
+    base_dir = get_output_dir()
+    return {
+        'video': f"{base_dir}/output_dub.mp4",
+        'sub': f"{base_dir}/dub.srt", 
+        'audio': f"{base_dir}/dub.mp3"
+    }
 
 TRANS_FONT_SIZE = 17
 TRANS_FONT_NAME = 'Arial'
@@ -39,7 +46,8 @@ def merge_video_audio():
         # Create a black frame
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(DUB_VIDEO, fourcc, 1, (1920, 1080))
+        dub_paths = _get_dub_paths()
+        out = cv2.VideoWriter(dub_paths['video'], fourcc, 1, (1920, 1080))
         out.write(frame)
         out.release()
 
@@ -47,8 +55,9 @@ def merge_video_audio():
         return
 
     # Normalize dub audio
-    normalized_dub_audio = 'output/normalized_dub.wav'
-    normalize_audio_volume(DUB_AUDIO, normalized_dub_audio)
+    dub_paths = _get_dub_paths()
+    normalized_dub_audio = f"{get_output_dir()}/normalized_dub.wav"
+    normalize_audio_volume(dub_paths['audio'], normalized_dub_audio)
     
     # Merge video and audio with translated subtitles
     video = cv2.VideoCapture(VIDEO_FILE)
@@ -58,7 +67,7 @@ def merge_video_audio():
     rprint(f"[bold green]Video resolution: {TARGET_WIDTH}x{TARGET_HEIGHT}[/bold green]")
     
     subtitle_filter = (
-        f"subtitles={DUB_SUB_FILE}:force_style='FontSize={TRANS_FONT_SIZE},"
+        f"subtitles={dub_paths['sub']}:force_style='FontSize={TRANS_FONT_SIZE},"
         f"FontName={TRANS_FONT_NAME},PrimaryColour={TRANS_FONT_COLOR},"
         f"OutlineColour={TRANS_OUTLINE_COLOR},OutlineWidth={TRANS_OUTLINE_WIDTH},"
         f"BackColour={TRANS_BACK_COLOR},Alignment=2,MarginV=27,BorderStyle=4'"
@@ -79,10 +88,10 @@ def merge_video_audio():
     else:
         cmd.extend(['-map', '[v]', '-map', '[a]'])
     
-    cmd.extend(['-c:a', 'aac', '-b:a', '96k', DUB_VIDEO])
+    cmd.extend(['-c:a', 'aac', '-b:a', '96k', dub_paths['video']])
     
     subprocess.run(cmd)
-    rprint(f"[bold green]Video and audio successfully merged into {DUB_VIDEO}[/bold green]")
+    rprint(f"[bold green]Video and audio successfully merged into {dub_paths['video']}[/bold green]")
 
 if __name__ == '__main__':
     merge_video_audio()

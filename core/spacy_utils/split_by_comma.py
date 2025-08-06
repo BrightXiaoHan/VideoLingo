@@ -103,7 +103,7 @@ def split_by_comma(text, nlp):
 
 def split_by_comma_main(nlp):
 
-    with open(SPLIT_BY_MARK_FILE, "r", encoding="utf-8") as input_file:
+    with open(SPLIT_BY_MARK_FILE(), "r", encoding="utf-8") as input_file:
         sentences = input_file.readlines()
 
     all_split_sentences = []
@@ -111,14 +111,14 @@ def split_by_comma_main(nlp):
         split_sentences = split_by_comma(sentence.strip(), nlp)
         all_split_sentences.extend(split_sentences)
 
-    with open(SPLIT_BY_COMMA_FILE, "w", encoding="utf-8") as output_file:
+    with open(SPLIT_BY_COMMA_FILE(), "w", encoding="utf-8") as output_file:
         for sentence in all_split_sentences:
             output_file.write(sentence + "\n")
     
     # delete the original file
-    os.remove(SPLIT_BY_MARK_FILE)
+    os.remove(SPLIT_BY_MARK_FILE())
     
-    rprint(f"[green]💾 Sentences split by commas saved to →  `{SPLIT_BY_COMMA_FILE}`[/green]")
+    rprint(f"[green]💾 Sentences split by commas saved to →  `{SPLIT_BY_COMMA_FILE()}`[/green]")
 
 if __name__ == "__main__":
     nlp = init_nlp()

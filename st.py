@@ -10,8 +10,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 st.set_page_config(page_title="VideoLingo", page_icon="docs/logo.svg")
 
-SUB_VIDEO = "output/output_sub.mp4"
-DUB_VIDEO = "output/output_dub.mp4"
+from core.utils.models import get_output_dir
+
+def _get_video_paths():
+    """Get dynamic video file paths"""
+    base_dir = get_output_dir()
+    return {
+        'sub': f"{base_dir}/output_sub.mp4",
+        'dub': f"{base_dir}/output_dub.mp4"
+    }
 
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
@@ -51,7 +58,7 @@ def process_text():
     with st.spinner(t("Summarizing and translating...")):
         _4_1_summarize.get_summary()
         if load_key("pause_before_translate"):
-            input(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `output/log/terminology.json` to edit terminology. Then press ENTER to continue..."))
+            input(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `{}/log/terminology.json` to edit terminology. Then press ENTER to continue...").format(get_output_dir()))
         _4_2_translate.translate_all()
     with st.spinner(t("Processing and aligning subtitles...")): 
         _5_split_sub.split_for_sub_main()

@@ -8,9 +8,15 @@ from core.utils import *
 from core.utils.models import *
 console = Console()
 
-DUB_VOCAL_FILE = 'output/dub.mp3'
+from core.utils.models import get_output_dir
 
-DUB_SUB_FILE = 'output/dub.srt'
+def _get_merge_paths():
+    """Get dynamic merge file paths"""
+    base_dir = get_output_dir()
+    return {
+        'vocal': f"{base_dir}/dub.mp3",
+        'sub': f"{base_dir}/dub.srt"
+    }
 OUTPUT_FILE_TEMPLATE = f"{_AUDIO_SEGS_DIR}/{{}}.wav"
 
 def load_and_flatten_data(excel_file):
@@ -144,7 +150,8 @@ def create_srt_subtitle(lines=None, adjusted_times=None):
     else:
         new_sub_times = adjusted_times
     
-    with open(DUB_SUB_FILE, 'w', encoding='utf-8') as f:
+    merge_paths = _get_merge_paths()
+    with open(merge_paths['sub'], 'w', encoding='utf-8') as f:
         for i, ((start_time, end_time), line) in enumerate(zip(new_sub_times, lines), 1):
             start_str = f"{int(start_time//3600):02d}:{int((start_time%3600)//60):02d}:{int(start_time%60):02d},{int((start_time*1000)%1000):03d}"
             end_str = f"{int(end_time//3600):02d}:{int((end_time%3600)//60):02d}:{int(end_time%60):02d},{int((end_time*1000)%1000):03d}"
@@ -153,7 +160,7 @@ def create_srt_subtitle(lines=None, adjusted_times=None):
             f.write(f"{start_str} --> {end_str}\n")
             f.write(f"{line}\n\n")
     
-    rprint(f"[bold green]✅ Subtitle file created: {DUB_SUB_FILE}[/bold green]")
+    rprint(f"[bold green]✅ Subtitle file created: {merge_paths['sub']}[/bold green]")
 
 def merge_full_audio():
     """Main function: Process the complete audio merging process"""
@@ -185,9 +192,10 @@ def merge_full_audio():
     
     with console.status("[bold cyan]💾 Exporting final audio file...[/bold cyan]"):
         merged_audio = merged_audio.set_frame_rate(16000).set_channels(1)
-        merged_audio.export(DUB_VOCAL_FILE, format="mp3", parameters=["-b:a", "64k"])
+        merge_paths = _get_merge_paths()
+        merged_audio.export(merge_paths['vocal'], format="mp3", parameters=["-b:a", "64k"])
     console.print(f"[bold green]✅ Audio file successfully merged![/bold green]")
-    console.print(f"[bold green]📁 Output file: {DUB_VOCAL_FILE}[/bold green]")
+    console.print(f"[bold green]📁 Output file: {merge_paths['vocal']}[/bold green]")
 
 if __name__ == "__main__":
     merge_full_audio()

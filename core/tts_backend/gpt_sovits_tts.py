@@ -86,7 +86,8 @@ def gpt_sovits_tts_for_videolingo(text, save_as, number, task_df):
         prompt_text = content
     elif REFER_MODE in [2, 3]:
         # Check if the reference audio file exists
-        ref_audio_path = current_dir / ("output/audio/refers/1.wav" if REFER_MODE == 2 else f"output/audio/refers/{number}.wav")
+        from core.utils.models import get_output_dir
+        ref_audio_path = current_dir / (f"{get_output_dir()}/audio/refers/1.wav" if REFER_MODE == 2 else f"{get_output_dir()}/audio/refers/{number}.wav")
         if not ref_audio_path.exists():
             # If the file does not exist, try to extract the reference audio
             try:
@@ -102,7 +103,7 @@ def gpt_sovits_tts_for_videolingo(text, save_as, number, task_df):
     success = gpt_sovits_tts(text, TARGET_LANGUAGE, save_as, ref_audio_path, prompt_lang, prompt_text)
     if not success and REFER_MODE == 3:
         rprint(f"[bold red]TTS request failed, switching back to mode 2 and retrying[/bold red]")
-        ref_audio_path = current_dir / "output/audio/refers/1.wav"
+        ref_audio_path = current_dir / f"{get_output_dir()}/audio/refers/1.wav"
         gpt_sovits_tts(text, TARGET_LANGUAGE, save_as, ref_audio_path, prompt_lang, prompt_text)
 
 

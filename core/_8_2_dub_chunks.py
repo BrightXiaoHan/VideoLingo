@@ -7,8 +7,15 @@ from core.tts_backend.estimate_duration import init_estimator, estimate_duration
 from core.utils import *
 from core.utils.models import *
 
-SRC_SRT = "output/src.srt"
-TRANS_SRT = "output/trans.srt"
+from core.utils.models import get_output_dir
+
+def _get_srt_paths():
+    """Get dynamic SRT file paths"""
+    base_dir = get_output_dir()
+    return {
+        'src': f"{base_dir}/src.srt",
+        'trans': f"{base_dir}/trans.srt"
+    }
 MAX_MERGE_COUNT = 5
 ESTIMATOR = None
 
@@ -140,8 +147,9 @@ def gen_dub_chunks():
     df = process_cutoffs(df)
 
     rprint("[📝 Reading] Loading transcript files...")
-    content = open(TRANS_SRT, "r", encoding="utf-8").read()
-    ori_content = open(SRC_SRT, "r", encoding="utf-8").read()
+    srt_paths = _get_srt_paths()
+    content = open(srt_paths['trans'], "r", encoding="utf-8").read()
+    ori_content = open(srt_paths['src'], "r", encoding="utf-8").read()
     
     # Process subtitle content
     content_lines = []

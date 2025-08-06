@@ -11,8 +11,15 @@ from core.utils.models import *
 console = Console()
 speed_factor = load_key("speed_factor")
 
-TRANS_SUBS_FOR_AUDIO_FILE = 'output/audio/trans_subs_for_audio.srt'
-SRC_SUBS_FOR_AUDIO_FILE = 'output/audio/src_subs_for_audio.srt'
+from core.utils.models import get_output_dir
+
+def _get_audio_subs_paths():
+    """Get dynamic audio subtitle file paths"""
+    base_dir = get_output_dir()
+    return {
+        'trans': f"{base_dir}/audio/trans_subs_for_audio.srt",
+        'src': f"{base_dir}/audio/src_subs_for_audio.srt"
+    }
 ESTIMATOR = None
 
 def check_len_then_trim(text, duration):
@@ -52,10 +59,11 @@ def time_diff_seconds(t1, t2, base_date):
 def process_srt():
     """Process srt file, generate audio tasks"""
     
-    with open(TRANS_SUBS_FOR_AUDIO_FILE, 'r', encoding='utf-8') as file:
+    audio_subs_paths = _get_audio_subs_paths()
+    with open(audio_subs_paths['trans'], 'r', encoding='utf-8') as file:
         content = file.read()
     
-    with open(SRC_SUBS_FOR_AUDIO_FILE, 'r', encoding='utf-8') as src_file:
+    with open(audio_subs_paths['src'], 'r', encoding='utf-8') as src_file:
         src_content = src_file.read()
     
     subtitles = []

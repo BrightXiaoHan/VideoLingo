@@ -32,6 +32,30 @@ def init_nlp():
 # --------------------
 # define the intermediate files
 # --------------------
-SPLIT_BY_COMMA_FILE = "output/log/split_by_comma.txt"
-SPLIT_BY_CONNECTOR_FILE = "output/log/split_by_connector.txt"
-SPLIT_BY_MARK_FILE = "output/log/split_by_mark.txt"
+from core.utils.models import get_output_dir
+
+def get_split_files():
+    """Get dynamic split file paths"""
+    base_dir = get_output_dir()
+    return {
+        'comma': f"{base_dir}/log/split_by_comma.txt",
+        'connector': f"{base_dir}/log/split_by_connector.txt", 
+        'mark': f"{base_dir}/log/split_by_mark.txt"
+    }
+
+# ------------
+# 向后兼容的函数式常量 (动态路径)
+# ------------
+def get_comma_file():
+    return f"{get_output_dir()}/log/split_by_comma.txt"
+
+def get_connector_file():
+    return f"{get_output_dir()}/log/split_by_connector.txt"
+
+def get_mark_file():
+    return f"{get_output_dir()}/log/split_by_mark.txt"
+
+# 为了向后兼容，保留原始常量名作为函数
+SPLIT_BY_COMMA_FILE = get_comma_file
+SPLIT_BY_CONNECTOR_FILE = get_connector_file  
+SPLIT_BY_MARK_FILE = get_mark_file
