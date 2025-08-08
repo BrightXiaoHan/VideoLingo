@@ -54,12 +54,38 @@ def download_video_ytdlp(url, save_path='output', resolution='1080'):
 def find_video_files():
     from core.utils.models import get_output_dir
     save_path = get_output_dir()
-    video_files = [file for file in glob.glob(save_path + "/*") if os.path.splitext(file)[1][1:].lower() in load_key("allowed_video_formats")]
+    # ------------
+    # collect candidate videos in current output dir
+    # ------------
+    video_files = [
+        file for file in glob.glob(save_path + "/*")
+        if os.path.splitext(file)[1][1:].lower() in load_key("allowed_video_formats")
+    ]
     # change \\ to /, this happen on windows
     if sys.platform.startswith('win'):
         video_files = [file.replace("\\", "/") for file in video_files]
+
+    # ------------
+    # prefer segment source video if present (e.g., source.mp4)
+    # ------------
+    source_candidates = [f for f in video_files if os.path.basename(f).startswith("source.")]
+    if len(source_candidates) == 1:
+        return source_candidates[0]
+
+    # ------------
+    # otherwise, drop intermediate outputs like output_sub.mp4/output_dub.mp4
+    # ------------
+    filtered = [
+        f for f in video_files
+        if not os.path.basename(f).startswith("output_sub")
+        and not os.path.basename(f).startswith("output_dub")
+    ]
+    if len(filtered) == 1:
+        return filtered[0]
+
     if len(video_files) != 1:
-        raise ValueError(f"Number of videos found {len(video_files)} is not unique. Please check.")
+        names = ", ".join(os.path.basename(f) for f in video_files)
+        raise ValueError(f"Number of videos found {len(video_files)} is not unique. Found: {names}")
     return video_files[0]
 
 if __name__ == '__main__':

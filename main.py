@@ -52,6 +52,11 @@ def main():
     # Audio command  
     parser_audio = subparsers.add_parser('audio', help='Process audio dubbing')
     
+    # ------------
+    # All-in-one command
+    # ------------
+    parser_all = subparsers.add_parser('all', help='Run subtitle then audio')
+    
     # Lipsync command
     parser_lipsync = subparsers.add_parser('lipsync', help='Process lip synchronization')
     parser_lipsync.add_argument('--enable', action='store_true', help='Enable lip sync')
@@ -73,6 +78,8 @@ def main():
         process_text_cli(args.output)
     elif args.command == 'audio':
         process_audio_cli(args.output)
+    elif args.command == 'all':
+        process_all_cli(args.output)
     elif args.command == 'lipsync':
         process_lip_sync_cli(enable=args.enable, resize_factor=args.quality, output_dir=args.output)
 
@@ -121,6 +128,16 @@ def process_audio_cli(output_dir):
     _12_dub_to_vid.merge_video_audio()
     
     print("Audio processing complete! 🎇")
+
+def process_all_cli(output_dir):
+    # ------------
+    # Run subtitle then audio in one command
+    # ------------
+    print(f"Using output directory: {output_dir}")
+    print("Running subtitle stage...")
+    process_text_cli(output_dir)
+    print("Running audio stage...")
+    process_audio_cli(output_dir)
 
 def process_lip_sync_cli(enable=True, resize_factor=1.0, output_dir=None):
     if not enable:
