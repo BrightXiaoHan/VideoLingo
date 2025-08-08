@@ -322,9 +322,14 @@ def process_file_source(source_path, base_output, config_path, segment_seconds, 
             handle_sequential_playback(finished_map, playback_state)
         time.sleep(0.5)
 
-    # stop any ongoing playback
-    if playback_state.get("current") is not None and playback_state["current"].poll() is None:
-        playback_state["current"].wait()
+    # continue playing remaining segments after all jobs are done
+    if play_after_each:
+        while playback_state.get("next_index", 0) < seg_index:
+            handle_sequential_playback(finished_map, playback_state)
+            time.sleep(0.5)
+        # wait for the final segment to finish playing
+        if playback_state.get("current") is not None and playback_state["current"].poll() is None:
+            playback_state["current"].wait()
 
     # collect dubbed videos in order
     indices = sorted(finished_map.keys())
