@@ -273,6 +273,8 @@ def process_file_source(source_path, base_output, config_path, segment_seconds, 
     playback_state = {"current": None, "next_index": 0}
 
     while current_start < total:
+        seg_dir = os.path.join(session_dir, f"seg_{seg_index:04d}")
+        ensure_dir(seg_dir)
         proposed_end = min(total, current_start + segment_seconds)
         adjusted_end = proposed_end
         if silence_window > 0.0 and proposed_end < total:
@@ -287,8 +289,6 @@ def process_file_source(source_path, base_output, config_path, segment_seconds, 
             if adjusted_end <= current_start + 1.0:
                 adjusted_end = proposed_end
 
-        seg_dir = os.path.join(session_dir, f"seg_{seg_index:04d}")
-        ensure_dir(seg_dir)
         seg_src = os.path.join(seg_dir, "source.mp4")
         ok = extract_segment(source_path, current_start, adjusted_end, seg_src, log_dir=seg_dir)
         if not ok:
