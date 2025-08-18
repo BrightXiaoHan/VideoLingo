@@ -4,6 +4,7 @@ import sys
 import subprocess
 import time
 import datetime
+import platform
 
 
 # ------------
@@ -248,6 +249,117 @@ def handle_sequential_playback(finished_map, playback_state):
 
 
 # ------------
+# Cross-platform camera support
+# ------------
+
+def get_os_type():
+    system = platform.system().lower()
+    if system == "darwin":
+        return "macos"
+    elif system == "linux":
+        return "linux"
+    elif system == "windows":
+        return "windows"
+    else:
+        return "unknown"
+
+
+def list_camera_devices():
+    os_type = get_os_type()
+    if os_type == "linux":
+        # List V4L2 devices and get their names
+        devices = []
+        for i in range(10):
+            device_path = f"/dev/video{i}"
+            if os.path.exists(device_path):
+                # Try to get device name from v4l2-ctl if available
+                device_info = f"video{i} ({device_path})"
+                try:
+                    result = subprocess.run(
+                        ["v4l2-ctl", "--device", device_path, "--info"],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.split('\n'):
+                            if 'Card type' in line:
+                                card_type = line.split(':', 1)[1].strip()
+                                device_info = f"video{i} - {card_type} ({device_path})"
+                                break
+                except Exception:
+                    pass
+                devices.append(device_info)
+        return devices
+    elif os_type == "macos":
+        # For macOS, we could list avfoundation devices, but keep simple for now
+        return ["0:0 - Video:Audio device 0", "1:0 - Video device 1", "0:1 - Audio device 1"]
+    elif os_type == "windows":
+        # For Windows, we could list dshow devices, but keep simple for now
+        return ["USB2.0 Camera - Example camera name"]
+    else:
+        return []
+
+
+def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, session_dir):
+    os_type = get_os_type()
+    
+    if os_type == "linux":
+        # Use V4L2 for Linux
+        if ":" in camera_spec:
+            # Convert macOS-style spec to Linux device
+            video_idx = camera_spec.split(":")[0]
+            device = f"/dev/video{video_idx}"
+        else:
+            # Assume it's already a Linux device path or index
+            if camera_spec.startswith("/dev/"):
+                device = camera_spec
+            else:
+                device = f"/dev/video{camera_spec}"
+        
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f", "v4l2",
+            "-i", device,
+            "-c:v", "libx264",
+            "-f", "segment",
+            "-segment_time", str(segment_seconds),
+            "-reset_timestamps", "1",
+            segment_pattern,
+        ]
+    elif os_type == "macos":
+        # Use avfoundation for macOS
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f", "avfoundation",
+            "-i", camera_spec,
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-f", "segment",
+            "-segment_time", str(segment_seconds),
+            "-reset_timestamps", "1",
+            segment_pattern,
+        ]
+    elif os_type == "windows":
+        # Use dshow for Windows
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f", "dshow",
+            "-i", f"video={camera_spec}",
+            "-c:v", "libx264",
+            "-f", "segment",
+            "-segment_time", str(segment_seconds),
+            "-reset_timestamps", "1",
+            segment_pattern,
+        ]
+    else:
+        raise Exception(f"Unsupported operating system: {os_type}")
+    
+    return cmd
+
+
+# ------------
 # File source pipeline
 # ------------
 
@@ -365,31 +477,13 @@ def is_file_stable(path, checks=3, interval=0.5):
     return True
 
 
-def process_camera_source(avfoundation_spec, base_output, config_path, segment_seconds, play_after_each, max_segments, max_concurrency):
+def process_camera_source(camera_spec, base_output, config_path, segment_seconds, play_after_each, max_segments, max_concurrency):
     session_dir = os.path.join(base_output, f"session_{timestamp_now()}")
     ensure_dir(session_dir)
     print(f"Session dir: {session_dir}")
 
     seg_pattern = os.path.join(session_dir, "live_%04d.mp4")
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-f",
-        "avfoundation",
-        "-i",
-        avfoundation_spec,
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
-        "-f",
-        "segment",
-        "-segment_time",
-        str(segment_seconds),
-        "-reset_timestamps",
-        "1",
-        seg_pattern,
-    ]
+    cmd = build_camera_capture_cmd(camera_spec, seg_pattern, segment_seconds, session_dir)
     print("Starting live capture...")
     capture_out = open(os.path.join(session_dir, "capture.out"), "w", encoding="utf-8")
     capture_err = open(os.path.join(session_dir, "capture.err"), "w", encoding="utf-8")
@@ -469,9 +563,9 @@ def process_camera_source(avfoundation_spec, base_output, config_path, segment_s
 
 def main():
     parser = argparse.ArgumentParser(description="VideoLingo realtime segmenter")
-    parser.add_argument("mode", choices=["file", "camera"], help="Input source mode")
+    parser.add_argument("mode", choices=["file", "camera", "list-cameras"], help="Input source mode or list available cameras")
     parser.add_argument("--source", type=str, default="", help="Path to input video when mode=file")
-    parser.add_argument("--camera-spec", type=str, default="0:0", help="avfoundation spec like '0:0' when mode=camera (macOS)")
+    parser.add_argument("--camera-spec", type=str, default="0", help="Camera device spec: '0:0' for macOS avfoundation, '0' or '/dev/video0' for Linux v4l2, 'USB2.0 Camera' for Windows dshow")
     parser.add_argument("--output", type=str, default="output", help="Base output directory")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config YAML path for main.py")
     parser.add_argument("--segment-seconds", type=int, default=300, help="Segment length in seconds")
@@ -483,6 +577,18 @@ def main():
     parser.add_argument("--max-concurrency", type=int, default=2, help="Max concurrent translation jobs")
 
     args = parser.parse_args()
+
+    if args.mode == "list-cameras":
+        os_type = get_os_type()
+        print(f"Operating system: {os_type}")
+        devices = list_camera_devices()
+        if devices:
+            print("Available camera devices:")
+            for device in devices:
+                print(f"  {device}")
+        else:
+            print("No camera devices found or OS not supported")
+        return 0
 
     if args.mode == "file":
         if not os.path.exists(args.source):
