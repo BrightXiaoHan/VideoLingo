@@ -299,33 +299,63 @@ def list_camera_devices():
         return []
 
 
-def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, session_dir):
+def test_audio_device(audio_device):
+    # Test if audio device is available by trying a short capture
+    test_cmd = [
+        "ffmpeg", "-y", "-f", "alsa", "-i", audio_device, "-t", "0.1", 
+        "-f", "null", "-"
+    ]
+    result = subprocess.run(test_cmd, capture_output=True, text=True)
+    return result.returncode == 0
+
+
+def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, session_dir, audio_device="default"):
     os_type = get_os_type()
     
     if os_type == "linux":
-        # Use V4L2 for Linux
+        # Use V4L2 for Linux with ALSA for audio
         if ":" in camera_spec:
             # Convert macOS-style spec to Linux device
             video_idx = camera_spec.split(":")[0]
-            device = f"/dev/video{video_idx}"
+            video_device = f"/dev/video{video_idx}"
         else:
             # Assume it's already a Linux device path or index
             if camera_spec.startswith("/dev/"):
-                device = camera_spec
+                video_device = camera_spec
             else:
-                device = f"/dev/video{camera_spec}"
+                video_device = f"/dev/video{camera_spec}"
         
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f", "v4l2",
-            "-i", device,
-            "-c:v", "libx264",
-            "-f", "segment",
-            "-segment_time", str(segment_seconds),
-            "-reset_timestamps", "1",
-            segment_pattern,
-        ]
+        # Test if audio device works, fallback to video-only if not
+        has_audio = test_audio_device(audio_device)
+        if has_audio:
+            print(f"Using audio device: {audio_device}")
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-f", "v4l2",
+                "-i", video_device,
+                "-f", "alsa",
+                "-i", audio_device,
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-f", "segment",
+                "-segment_time", str(segment_seconds),
+                "-reset_timestamps", "1",
+                segment_pattern,
+            ]
+        else:
+            print(f"Warning: Audio device {audio_device} not available, using video-only capture")
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-f", "v4l2",
+                "-i", video_device,
+                "-c:v", "libx264",
+                "-f", "segment",
+                "-segment_time", str(segment_seconds),
+                "-reset_timestamps", "1",
+                segment_pattern,
+            ]
     elif os_type == "macos":
         # Use avfoundation for macOS
         cmd = [
@@ -477,13 +507,13 @@ def is_file_stable(path, checks=3, interval=0.5):
     return True
 
 
-def process_camera_source(camera_spec, base_output, config_path, segment_seconds, play_after_each, max_segments, max_concurrency):
+def process_camera_source(camera_spec, base_output, config_path, segment_seconds, play_after_each, max_segments, max_concurrency, audio_device="default"):
     session_dir = os.path.join(base_output, f"session_{timestamp_now()}")
     ensure_dir(session_dir)
     print(f"Session dir: {session_dir}")
 
     seg_pattern = os.path.join(session_dir, "live_%04d.mp4")
-    cmd = build_camera_capture_cmd(camera_spec, seg_pattern, segment_seconds, session_dir)
+    cmd = build_camera_capture_cmd(camera_spec, seg_pattern, segment_seconds, session_dir, audio_device)
     print("Starting live capture...")
     capture_out = open(os.path.join(session_dir, "capture.out"), "w", encoding="utf-8")
     capture_err = open(os.path.join(session_dir, "capture.err"), "w", encoding="utf-8")
@@ -565,7 +595,8 @@ def main():
     parser = argparse.ArgumentParser(description="VideoLingo realtime segmenter")
     parser.add_argument("mode", choices=["file", "camera", "list-cameras"], help="Input source mode or list available cameras")
     parser.add_argument("--source", type=str, default="", help="Path to input video when mode=file")
-    parser.add_argument("--camera-spec", type=str, default="0", help="Camera device spec: '0:0' for macOS avfoundation, '0' or '/dev/video0' for Linux v4l2, 'USB2.0 Camera' for Windows dshow")
+    parser.add_argument("--camera-spec", type=str, default="0", help="Camera device spec: '0:0' for macOS avfoundation, '0' or '/dev/video0' for Linux v4l2 (audio from default ALSA), 'USB2.0 Camera' for Windows dshow")
+    parser.add_argument("--audio-device", type=str, default="default", help="Audio device for Linux (ALSA device name, e.g., 'default', 'hw:0', 'plughw:1,0')")
     parser.add_argument("--output", type=str, default="output", help="Base output directory")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config YAML path for main.py")
     parser.add_argument("--segment-seconds", type=int, default=300, help="Segment length in seconds")
@@ -615,6 +646,7 @@ def main():
             args.play,
             args.max_segments,
             args.max_concurrency,
+            args.audio_device,
         )
 
     return 0

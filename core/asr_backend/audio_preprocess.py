@@ -21,13 +21,55 @@ def convert_video_to_audio(video_file: str):
     os.makedirs(_AUDIO_DIR, exist_ok=True)
     if not os.path.exists(_RAW_AUDIO_FILE):
         rprint(f"[blue]🎬➡️🎵 Converting to high quality audio with FFmpeg ......[/blue]")
-        subprocess.run([
-            'ffmpeg', '-y', '-i', video_file, '-vn',
-            '-c:a', 'libmp3lame', '-b:a', '32k',
-            '-ar', '16000',
-            '-ac', '1', 
-            '-metadata', 'encoding=UTF-8', _RAW_AUDIO_FILE
-        ], check=True, stderr=subprocess.PIPE)
+        
+        # First check if the video file exists and has audio
+        if not os.path.exists(video_file):
+            raise FileNotFoundError(f"Video file not found: {video_file}")
+        
+        # Check if video has audio track
+        probe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-count_packets', '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', video_file]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        
+        if probe_result.returncode != 0 or not probe_result.stdout.strip():
+            rprint(f"[yellow]⚠️ Warning: Video file has no audio track, creating silent audio track[/yellow]")
+            # Create a silent audio track with same duration as video
+            duration_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_file]
+            duration_result = subprocess.run(duration_cmd, capture_output=True, text=True)
+            
+            if duration_result.returncode == 0 and duration_result.stdout.strip():
+                duration = float(duration_result.stdout.strip())
+                # Generate silent audio
+                silent_cmd = [
+                    'ffmpeg', '-y', '-f', 'lavfi', '-i', f'anullsrc=channel_layout=mono:sample_rate=16000', 
+                    '-t', str(duration), '-c:a', 'libmp3lame', '-b:a', '32k', _RAW_AUDIO_FILE
+                ]
+                result = subprocess.run(silent_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    rprint(f"[red]❌ Error creating silent audio: {result.stderr}[/red]")
+                    raise subprocess.CalledProcessError(result.returncode, silent_cmd, result.stderr)
+                rprint(f"[yellow]🔇 Created silent audio track for video without audio[/yellow]")
+            else:
+                raise Exception(f"Could not determine video duration for {video_file}")
+        else:
+            # Normal audio extraction
+            result = subprocess.run([
+                'ffmpeg', '-y', '-i', video_file, '-vn',
+                '-c:a', 'libmp3lame', '-b:a', '32k',
+                '-ar', '16000',
+                '-ac', '1', 
+                '-metadata', 'encoding=UTF-8', _RAW_AUDIO_FILE
+            ], capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                rprint(f"[red]❌ FFmpeg error during audio conversion:[/red]")
+                rprint(f"[red]{result.stderr}[/red]")
+                rprint(f"[blue]Video file info:[/blue]")
+                info_cmd = ['ffprobe', '-v', 'error', '-show_format', '-show_streams', video_file]
+                info_result = subprocess.run(info_cmd, capture_output=True, text=True)
+                if info_result.returncode == 0:
+                    rprint(f"[blue]{info_result.stdout}[/blue]")
+                raise subprocess.CalledProcessError(result.returncode, ['ffmpeg', '...'], result.stderr)
+            
         rprint(f"[green]🎬➡️🎵 Converted <{video_file}> to <{_RAW_AUDIO_FILE}> with FFmpeg\n[/green]")
 
 def get_audio_duration(audio_file: str) -> float:
