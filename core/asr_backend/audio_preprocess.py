@@ -17,14 +17,44 @@ def normalize_audio_volume(audio_path, output_path, target_db = -20.0, format = 
     rprint(f"[green]✅ Audio normalized from {audio.dBFS:.1f}dB to {target_db:.1f}dB[/green]")
     return output_path
 
+def validate_video_file(video_file: str) -> bool:
+    """Validate that a video file exists and is readable."""
+    if not os.path.exists(video_file):
+        rprint(f"[red]❌ Video file not found: {video_file}[/red]")
+        return False
+        
+    file_size = os.path.getsize(video_file)
+    if file_size == 0:
+        rprint(f"[red]❌ Video file is empty (0 bytes): {video_file}[/red]")
+        return False
+        
+    if file_size < 1024:  # Less than 1KB is likely corrupted
+        rprint(f"[red]❌ Video file too small ({file_size} bytes): {video_file}[/red]")
+        return False
+    
+    # Test basic video readability
+    test_cmd = ['ffprobe', '-v', 'error', '-show_format', '-show_streams', video_file]
+    test_result = subprocess.run(test_cmd, capture_output=True, text=True)
+    
+    if test_result.returncode != 0:
+        rprint(f"[red]❌ Video file appears corrupted:[/red]")
+        rprint(f"[red]File: {video_file}[/red]")
+        rprint(f"[red]Size: {file_size} bytes[/red]")
+        rprint(f"[red]FFprobe error: {test_result.stderr.strip()}[/red]")
+        return False
+    
+    rprint(f"[green]✅ Video file validated: {video_file} ({file_size} bytes)[/green]")
+    return True
+
+
 def convert_video_to_audio(video_file: str):
     os.makedirs(_AUDIO_DIR, exist_ok=True)
     if not os.path.exists(_RAW_AUDIO_FILE):
         rprint(f"[blue]🎬➡️🎵 Converting to high quality audio with FFmpeg ......[/blue]")
         
-        # First check if the video file exists and has audio
-        if not os.path.exists(video_file):
-            raise FileNotFoundError(f"Video file not found: {video_file}")
+        # First validate the video file
+        if not validate_video_file(video_file):
+            raise Exception(f"Video file validation failed: {video_file}")
         
         # Check if video has audio track
         probe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-count_packets', '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', video_file]
@@ -37,7 +67,14 @@ def convert_video_to_audio(video_file: str):
             duration_result = subprocess.run(duration_cmd, capture_output=True, text=True)
             
             if duration_result.returncode == 0 and duration_result.stdout.strip():
-                duration = float(duration_result.stdout.strip())
+                try:
+                    duration = float(duration_result.stdout.strip())
+                    if duration <= 0:
+                        raise ValueError(f"Invalid duration: {duration}")
+                except ValueError as e:
+                    rprint(f"[red]❌ Invalid video duration: {duration_result.stdout.strip()}[/red]")
+                    raise Exception(f"Could not parse video duration for {video_file}: {e}")
+                
                 # Generate silent audio
                 silent_cmd = [
                     'ffmpeg', '-y', '-f', 'lavfi', '-i', f'anullsrc=channel_layout=mono:sample_rate=16000', 
@@ -47,8 +84,13 @@ def convert_video_to_audio(video_file: str):
                 if result.returncode != 0:
                     rprint(f"[red]❌ Error creating silent audio: {result.stderr}[/red]")
                     raise subprocess.CalledProcessError(result.returncode, silent_cmd, result.stderr)
-                rprint(f"[yellow]🔇 Created silent audio track for video without audio[/yellow]")
+                rprint(f"[yellow]🔇 Created silent audio track ({duration:.2f}s) for video without audio[/yellow]")
             else:
+                rprint(f"[red]❌ Could not determine video duration:[/red]")
+                rprint(f"[red]FFprobe command: {' '.join(duration_cmd)}[/red]")
+                rprint(f"[red]Exit code: {duration_result.returncode}[/red]")
+                rprint(f"[red]Stderr: {duration_result.stderr}[/red]")
+                rprint(f"[red]Stdout: {duration_result.stdout}[/red]")
                 raise Exception(f"Could not determine video duration for {video_file}")
         else:
             # Normal audio extraction

@@ -147,7 +147,19 @@ def extract_segment(source_path, start_sec, end_sec, out_path, log_dir=None):
     out_log = os.path.join(log_dir, "extract.out") if log_dir else None
     err_log = os.path.join(log_dir, "extract.err") if log_dir else None
     code, _, _ = run_cmd(cmd, out_path=out_log, err_path=err_log)
-    return code == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0
+    
+    # Basic file existence and size check
+    if code != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        print(f"❌ Segment extraction failed: {out_path}")
+        return False
+    
+    # Validate the extracted segment
+    if not validate_video_file(out_path):
+        print(f"❌ Extracted segment is corrupted: {out_path}")
+        return False
+        
+    print(f"✅ Segment extracted and validated: {out_path}")
+    return True
 
 
 def start_segment_pipeline_async(segment_dir, config_path):
@@ -507,6 +519,54 @@ def is_file_stable(path, checks=3, interval=0.5):
     return True
 
 
+def validate_video_file(video_path):
+    """Validate that a video file is not corrupted and can be processed."""
+    if not os.path.exists(video_path):
+        print(f"❌ Video file does not exist: {video_path}")
+        return False
+        
+    file_size = os.path.getsize(video_path)
+    if file_size == 0:
+        print(f"❌ Video file is empty: {video_path}")
+        return False
+        
+    if file_size < 1024:  # Less than 1KB is likely corrupted
+        print(f"❌ Video file too small ({file_size} bytes): {video_path}")
+        return False
+    
+    # Test with ffprobe to see if file is readable
+    test_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", video_path]
+    test_result = subprocess.run(test_cmd, capture_output=True, text=True)
+    
+    if test_result.returncode != 0:
+        print(f"❌ Video file appears corrupted (ffprobe failed): {video_path}")
+        print(f"   FFprobe error: {test_result.stderr.strip()}")
+        return False
+    
+    if not test_result.stdout.strip():
+        print(f"❌ Video file has no video streams: {video_path}")
+        return False
+        
+    # Get basic video info for logging
+    info_cmd = ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", video_path]
+    info_result = subprocess.run(info_cmd, capture_output=True, text=True)
+    
+    if info_result.returncode == 0:
+        try:
+            import json
+            info = json.loads(info_result.stdout)
+            duration = float(info.get("format", {}).get("duration", 0))
+            if duration <= 0:
+                print(f"⚠️  Video file has zero duration: {video_path}")
+                return False
+            print(f"📹 Video validated: {video_path} ({file_size} bytes, {duration:.2f}s)")
+        except Exception:
+            # JSON parsing failed, but ffprobe worked, so file is probably OK
+            print(f"📹 Video validated: {video_path} ({file_size} bytes)")
+    
+    return True
+
+
 def process_camera_source(camera_spec, base_output, config_path, segment_seconds, play_after_each, max_segments, max_concurrency, audio_device="default"):
     session_dir = os.path.join(base_output, f"session_{timestamp_now()}")
     ensure_dir(session_dir)
@@ -515,9 +575,23 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
     seg_pattern = os.path.join(session_dir, "live_%04d.mp4")
     cmd = build_camera_capture_cmd(camera_spec, seg_pattern, segment_seconds, session_dir, audio_device)
     print("Starting live capture...")
+    print(f"Capture command: {' '.join(cmd)}")
     capture_out = open(os.path.join(session_dir, "capture.out"), "w", encoding="utf-8")
     capture_err = open(os.path.join(session_dir, "capture.err"), "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, stdout=capture_out, stderr=capture_err, text=True)
+    
+    # Give FFmpeg a moment to start up
+    time.sleep(2)
+    if proc.poll() is not None:
+        capture_out.close()
+        capture_err.close()
+        # Read error output
+        with open(os.path.join(session_dir, "capture.err"), "r", encoding="utf-8") as f:
+            err_content = f.read()
+        print(f"❌ FFmpeg capture failed immediately:")
+        print(f"Exit code: {proc.returncode}")
+        print(f"Error output: {err_content}")
+        return proc.returncode
 
     processed = 0
     seen = set()
@@ -538,7 +612,14 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
             seg_dir = os.path.join(session_dir, f"seg_{processed:04d}")
             ensure_dir(seg_dir)
             seg_src = os.path.join(seg_dir, "source.mp4")
+            
+            # Validate captured file before processing
+            if not validate_video_file(f):
+                print(f"Warning: Captured file {f} is invalid, skipping")
+                continue
+                
             os.replace(f, seg_src)
+            print(f"✅ Valid segment captured: {seg_src} ({os.path.getsize(seg_src)} bytes)")
 
             # throttle concurrency
             while sum(1 for j in jobs if not j["done"]) >= max_concurrency:
@@ -587,13 +668,114 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
     return 0
 
 
+def test_camera_setup(camera_spec, audio_device="default"):
+    """Test camera and audio setup to help debug issues."""
+    os_type = get_os_type()
+    print(f"=== Camera Setup Test ===")
+    print(f"Operating system: {os_type}")
+    print(f"Camera spec: {camera_spec}")
+    print(f"Audio device: {audio_device}")
+    print()
+    
+    # Test camera device
+    if os_type == "linux":
+        if ":" in camera_spec:
+            video_device = f"/dev/video{camera_spec.split(':')[0]}"
+        elif camera_spec.startswith("/dev/"):
+            video_device = camera_spec
+        else:
+            video_device = f"/dev/video{camera_spec}"
+            
+        print(f"Testing video device: {video_device}")
+        if os.path.exists(video_device):
+            print("✅ Video device exists")
+            # Test device capabilities
+            v4l_cmd = ["v4l2-ctl", "--device", video_device, "--list-formats-ext"]
+            v4l_result = subprocess.run(v4l_cmd, capture_output=True, text=True)
+            if v4l_result.returncode == 0:
+                print("✅ Video device formats:")
+                print(v4l_result.stdout)
+            else:
+                print(f"⚠️  Could not query video formats: {v4l_result.stderr}")
+        else:
+            print("❌ Video device does not exist")
+            return 1
+    
+    # Test audio device
+    if os_type == "linux":
+        print(f"\nTesting audio device: {audio_device}")
+        if test_audio_device(audio_device):
+            print("✅ Audio device available")
+        else:
+            print("❌ Audio device not available")
+            
+        # List ALSA devices
+        aplay_cmd = ["aplay", "-l"]
+        aplay_result = subprocess.run(aplay_cmd, capture_output=True, text=True)
+        if aplay_result.returncode == 0:
+            print("\n📊 Available ALSA playback devices:")
+            print(aplay_result.stdout)
+        
+        arecord_cmd = ["arecord", "-l"]
+        arecord_result = subprocess.run(arecord_cmd, capture_output=True, text=True)
+        if arecord_result.returncode == 0:
+            print("\n🎤 Available ALSA capture devices:")
+            print(arecord_result.stdout)
+    
+    # Test short capture
+    print(f"\n=== Testing 5-second capture ===")
+    temp_dir = "/tmp/videolingo_test"
+    os.makedirs(temp_dir, exist_ok=True)
+    test_output = os.path.join(temp_dir, "test_capture.mp4")
+    
+    cmd = build_camera_capture_cmd(camera_spec, test_output.replace(".mp4", "_%04d.mp4"), 5, temp_dir, audio_device)
+    print(f"Test command: {' '.join(cmd)}")
+    
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(7)  # Let it capture for 5+ seconds
+    
+    if proc.poll() is None:
+        proc.terminate()
+        proc.wait()
+    
+    stdout, stderr = proc.communicate()
+    print(f"FFmpeg exit code: {proc.returncode}")
+    if stderr:
+        print(f"FFmpeg stderr:\n{stderr}")
+    
+    # Check captured files
+    import glob
+    captured_files = glob.glob(os.path.join(temp_dir, "test_capture_*.mp4"))
+    if captured_files:
+        for f in captured_files:
+            if validate_video_file(f):
+                print(f"✅ Successfully captured: {f}")
+            else:
+                print(f"❌ Captured file is invalid: {f}")
+    else:
+        print("❌ No files were captured")
+    
+    # Cleanup
+    for f in captured_files:
+        try:
+            os.remove(f)
+        except Exception:
+            pass
+    try:
+        os.rmdir(temp_dir)
+    except Exception:
+        pass
+    
+    return 0
+
+
 # ------------
 # CLI
 # ------------
 
 def main():
     parser = argparse.ArgumentParser(description="VideoLingo realtime segmenter")
-    parser.add_argument("mode", choices=["file", "camera", "list-cameras"], help="Input source mode or list available cameras")
+    parser.add_argument("mode", choices=["file", "camera", "list-cameras", "test-camera"], help="Input source mode, list cameras, or test camera setup")
     parser.add_argument("--source", type=str, default="", help="Path to input video when mode=file")
     parser.add_argument("--camera-spec", type=str, default="0", help="Camera device spec: '0:0' for macOS avfoundation, '0' or '/dev/video0' for Linux v4l2 (audio from default ALSA), 'USB2.0 Camera' for Windows dshow")
     parser.add_argument("--audio-device", type=str, default="default", help="Audio device for Linux (ALSA device name, e.g., 'default', 'hw:0', 'plughw:1,0')")
@@ -620,6 +802,9 @@ def main():
         else:
             print("No camera devices found or OS not supported")
         return 0
+
+    if args.mode == "test-camera":
+        return test_camera_setup(args.camera_spec, args.audio_device)
 
     if args.mode == "file":
         if not os.path.exists(args.source):
