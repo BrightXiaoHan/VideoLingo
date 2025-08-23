@@ -223,12 +223,18 @@ def save_results(df: pd.DataFrame):
     from core.utils.models import get_output_dir
     os.makedirs(f'{get_output_dir()}/log', exist_ok=True)
 
-    # Remove rows where 'text' is empty
-    initial_rows = len(df)
-    df = df[df['text'].str.len() > 0]
-    removed_rows = initial_rows - len(df)
-    if removed_rows > 0:
-        rprint(f"[blue]ℹ️ Removed {removed_rows} row(s) with empty text.[/blue]")
+    # Handle empty DataFrame (no speech detected)
+    if df.empty or 'text' not in df.columns:
+        rprint(f"[yellow]⚠️ No speech detected in this segment, creating empty results file.[/yellow]")
+        # Create empty DataFrame with expected columns
+        df = pd.DataFrame(columns=['text', 'start', 'end', 'speaker_id'])
+    else:
+        # Remove rows where 'text' is empty
+        initial_rows = len(df)
+        df = df[df['text'].str.len() > 0]
+        removed_rows = initial_rows - len(df)
+        if removed_rows > 0:
+            rprint(f"[blue]ℹ️ Removed {removed_rows} row(s) with empty text.[/blue]")
     
     # Check for and remove words longer than 20 characters
     long_words = df[df['text'].str.len() > 30]
