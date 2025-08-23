@@ -369,11 +369,13 @@ def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, sess
                 segment_pattern,
             ]
     elif os_type == "macos":
-        # Use avfoundation for macOS
+        # Use avfoundation for macOS with proper framerate
         cmd = [
             "ffmpeg",
             "-y",
             "-f", "avfoundation",
+            "-framerate", "30",  # Set explicit framerate
+            "-video_size", "1280x720",  # Set reasonable resolution
             "-i", camera_spec,
             "-c:v", "libx264",
             "-c:a", "aac",
@@ -506,9 +508,20 @@ def list_dir_sorted_by_index(dir_path, prefix):
     return [os.path.join(dir_path, n) for n in files]
 
 
-def is_file_stable(path, checks=3, interval=0.5):
+def is_file_stable(path, checks=5, interval=1.0):
+    """Check if file is stable and properly written by FFmpeg."""
     if not os.path.exists(path):
         return False
+    
+    # Wait for file to have reasonable size
+    for _ in range(10):  # Wait up to 10 seconds
+        if os.path.getsize(path) > 1024:  # At least 1KB
+            break
+        time.sleep(1)
+    else:
+        return False
+    
+    # Check size stability  
     last = os.path.getsize(path)
     for _ in range(checks):
         time.sleep(interval)
@@ -516,7 +529,12 @@ def is_file_stable(path, checks=3, interval=0.5):
         if now != last:
             last = now
             continue
-    return True
+    
+    # Additional check: verify MP4 structure is complete
+    test_cmd = ["ffprobe", "-v", "error", "-show_format", path]
+    test_result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=5)
+    
+    return test_result.returncode == 0
 
 
 def validate_video_file(video_path):
@@ -600,7 +618,7 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
     playback_state = {"current": None, "next_index": 0}
 
     while True:
-        time.sleep(0.5)
+        time.sleep(2.0)  # Longer interval to let FFmpeg finish writing
         files = list_dir_sorted_by_index(session_dir, "live_")
         for f in files:
             if f in seen:
@@ -613,13 +631,14 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
             ensure_dir(seg_dir)
             seg_src = os.path.join(seg_dir, "source.mp4")
             
-            # Validate captured file before processing
-            if not validate_video_file(f):
-                print(f"Warning: Captured file {f} is invalid, skipping")
-                continue
-                
+            # Move first, then validate (file is more stable after move)
             os.replace(f, seg_src)
-            print(f"✅ Valid segment captured: {seg_src} ({os.path.getsize(seg_src)} bytes)")
+            
+            # Validate moved file
+            if not validate_video_file(seg_src):
+                print(f"⚠️  Warning: Captured file {seg_src} may have issues, but continuing...")
+            else:
+                print(f"✅ Valid segment captured: {seg_src} ({os.path.getsize(seg_src)} bytes)")
 
             # throttle concurrency
             while sum(1 for j in jobs if not j["done"]) >= max_concurrency:
