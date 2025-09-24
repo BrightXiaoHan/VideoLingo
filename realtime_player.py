@@ -138,12 +138,17 @@ def play_with_vlc(video_path):
 def play_with_default(video_path):
     os_type = get_os_type()
     if os_type == "windows":
-        # Try powershell Start-Process first; fall back to cmd start if it fails (e.g. UWP handlers).
+        # Try PowerShell Start-Process first; fall back to cmd start if it fails (e.g. UWP handlers).
         escaped_path = video_path.replace("'", "''")
         ps_command = (
             "$ErrorActionPreference='Stop';"
-            f"$proc = Start-Process -LiteralPath '{escaped_path}' -PassThru;"
-            "if ($proc) { $proc.WaitForExit() }"
+            "try {"
+            f"    Start-Process -FilePath '{escaped_path}' -Wait;"
+            "    exit 0"
+            "} catch {"
+            "    try { Start-Process -FilePath '{escaped_path}'; exit 0 }"
+            "    catch { exit 1 }"
+            "}"
         )
         cmd = [
             "powershell",
@@ -159,8 +164,7 @@ def play_with_default(video_path):
 
         # Fall back to cmd /c start /wait to leverage default associations when Start-Process fails.
         escaped_for_cmd = video_path.replace('"', '\\"')
-        quoted_path = f'"{escaped_for_cmd}"'
-        fallback_cmd = ["cmd", "/c", "start", "", "/wait", quoted_path]
+        fallback_cmd = ["cmd", "/c", "start", '""', "/wait", f'"{escaped_for_cmd}"']
         print(f"▶️  Fallback with cmd.exe: {' '.join(fallback_cmd)}")
         proc = subprocess.Popen(fallback_cmd)
         proc.wait()
