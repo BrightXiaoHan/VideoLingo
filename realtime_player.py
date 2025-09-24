@@ -97,21 +97,41 @@ def validate_video_file(video_path):
     return True
 
 
-def is_file_stable(path, checks=3, interval=1.0, min_size=1024):
-    if not os.path.exists(path):
+class FileStabilityTracker:
+    """Track file size over time to determine when writing has quiesced."""
+
+    def __init__(self, min_size=1024, stable_duration=0.25):
+        self.min_size = min_size
+        self.stable_duration = stable_duration
+        self._seen = {}
+
+    def _reset(self, path):
+        self._seen.pop(path, None)
+
+    def mark_consumed(self, path):
+        self._reset(path)
+
+    def is_stable(self, path):
+        if not os.path.exists(path):
+            self._reset(path)
+            return False
+
+        size = os.path.getsize(path)
+        if size < self.min_size:
+            self._seen[path] = (size, time.time())
+            return False
+
+        now = time.time()
+        last = self._seen.get(path)
+        if last is None or last[0] != size:
+            self._seen[path] = (size, now)
+            return False
+
+        if now - last[1] >= self.stable_duration:
+            self._reset(path)
+            return True
+
         return False
-    for _ in range(10):
-        if os.path.getsize(path) > min_size:
-            break
-        time.sleep(0.5)
-    last = os.path.getsize(path)
-    for _ in range(checks):
-        time.sleep(interval)
-        now = os.path.getsize(path)
-        if now != last:
-            last = now
-            continue
-    return True
 
 
 # ------------
@@ -309,7 +329,7 @@ if INTERNAL_PLAYER_AVAILABLE:
                 visible = cv2.getWindowProperty(self.window_name, cv2.WND_PROP_VISIBLE)
             except cv2.error:
                 visible = -1
-            if visible < 1:
+            if visible < 0:
                 self._should_stop = True
             return self._should_stop
 
@@ -392,12 +412,14 @@ if INTERNAL_PLAYER_AVAILABLE:
                 audio_thread.start()
 
             frames_played = 0
+            last_frame = None
             try:
                 while True:
                     ret, frame = cap.read()
                     if not ret:
                         break
                     cv2.imshow(self.window_name, frame)
+                    last_frame = frame
                     frames_played += 1
                     if self._handle_window_events(wait_ms):
                         stop_event.set()
@@ -414,8 +436,9 @@ if INTERNAL_PLAYER_AVAILABLE:
             if frames_played == 0:
                 print(f"⚠️  Segment contained no frames: {video_path}")
                 return False
-            # Keep the last frame visible while waiting for the next segment
-            self._handle_window_events(1)
+            if last_frame is not None:
+                cv2.imshow(self.window_name, last_frame)
+                self._handle_window_events(1)
             return True
 
         def process_events(self, wait_seconds):
@@ -485,20 +508,32 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
             segment_player = None
             selected_player = "auto"
 
+    stable_duration = 0.2 if use_internal else max(0.25, min(poll_interval, 1.0))
+    stability_tracker = FileStabilityTracker(stable_duration=stable_duration)
+
+    wait_step = poll_interval
+    if use_internal:
+        wait_step = min(poll_interval, 0.1)
+        if wait_step <= 0:
+            wait_step = 0.05
+    else:
+        wait_step = poll_interval if poll_interval > 0 else 0.2
+
     index = start_index
     try:
         while True:
             video_path = segment_video_path(session_dir, index)
             played = False
 
-            if os.path.exists(video_path):
-                if is_file_stable(video_path) and validate_video_file(video_path):
+            if stability_tracker.is_stable(video_path):
+                if validate_video_file(video_path):
                     if use_internal and segment_player is not None:
                         played = segment_player.play_segment(video_path)
                         if segment_player.should_stop():
                             print("🛑 Playback stopped by user. Exiting.")
                             break
                         if played:
+                            stability_tracker.mark_consumed(video_path)
                             print(f"✅ Played segment {index:04d}")
                             index += 1
                             continue
@@ -507,6 +542,7 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
                     else:
                         ok = play_video(video_path, selected_player)
                         if ok:
+                            stability_tracker.mark_consumed(video_path)
                             print(f"✅ Played segment {index:04d}")
                             index += 1
                             continue
@@ -514,11 +550,11 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
                             print("❌ Player failed, retry in a moment...")
 
             if use_internal and segment_player is not None:
-                if segment_player.process_events(poll_interval):
+                if segment_player.process_events(wait_step):
                     print("🛑 Playback stopped by user. Exiting.")
                     break
             else:
-                time.sleep(poll_interval)
+                time.sleep(wait_step)
     finally:
         if segment_player is not None:
             segment_player.close()
