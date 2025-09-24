@@ -163,8 +163,7 @@ def play_with_default(video_path):
             return True
 
         # Fall back to cmd /c start /wait to leverage default associations when Start-Process fails.
-        escaped_for_cmd = video_path.replace('"', '\\"')
-        fallback_cmd = ["cmd", "/c", "start", '""', "/wait", f'"{escaped_for_cmd}"']
+        fallback_cmd = ["cmd", "/c", "start", "", "/wait", video_path]
         print(f"▶️  Fallback with cmd.exe: {' '.join(fallback_cmd)}")
         proc = subprocess.Popen(fallback_cmd)
         proc.wait()
