@@ -138,14 +138,13 @@ def play_with_vlc(video_path):
 def play_with_default(video_path):
     os_type = get_os_type()
     if os_type == "windows":
+        escaped_path = video_path.replace("'", "''")
+        ps_command = f"Start-Process -FilePath '{escaped_path}' -Wait"
         cmd = [
             "powershell",
             "-NoProfile",
             "-Command",
-            "Start-Process",
-            "-FilePath",
-            video_path,
-            "-Wait",
+            ps_command,
         ]
         print(f"▶️  Playing with default (Windows): {' '.join(cmd)}")
         proc = subprocess.Popen(cmd)
@@ -250,5 +249,4 @@ def main():
 if __name__ == "__main__":
     code = main()
     raise SystemExit(code)
-
 
