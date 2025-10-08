@@ -65,7 +65,7 @@ class LauncherApp(tk.Tk):
         log_frame = ttk.LabelFrame(self, text="Command Log")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        self.log_widget = ScrolledText(log_frame, height=10, state=tk.DISABLED)
+        self.log_widget = ScrolledText(log_frame, height=6, state=tk.DISABLED)
         self.log_widget.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
     # ---------
@@ -333,15 +333,18 @@ class LauncherApp(tk.Tk):
 
         # Message input
         message_frame = ttk.Frame(parent)
-        message_frame.pack(fill=tk.X, padx=10, pady=5)
+        message_frame.pack(fill=tk.BOTH, padx=10, pady=5)
 
-        ttk.Label(message_frame, text="Message:").pack(side=tk.LEFT, padx=(0, 5))
-        self.message_var = tk.StringVar()
-        message_entry = ttk.Entry(message_frame, textvariable=self.message_var, width=50)
-        message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        message_entry.bind('<Return>', lambda e: self._send_chat_message())
+        ttk.Label(message_frame, text="Message:").grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=(0, 5), pady=(0, 2))
+        self.message_input = tk.Text(message_frame, height=4, wrap=tk.WORD)
+        self.message_input.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=5)
+        self.message_input.bind("<Return>", self._on_message_return)
         
-        ttk.Button(message_frame, text="Send", command=self._send_chat_message).pack(side=tk.RIGHT)
+        ttk.Button(message_frame, text="Send", command=self._send_chat_message).grid(row=2, column=0, columnspan=3, sticky=tk.E, padx=5, pady=(5, 0))
+        message_frame.grid_columnconfigure(0, weight=1)
+        message_frame.grid_columnconfigure(1, weight=1)
+        message_frame.grid_columnconfigure(2, weight=1)
+        message_frame.grid_rowconfigure(1, weight=1)
 
     # ---------
     # Chat handlers
@@ -414,17 +417,25 @@ class LauncherApp(tk.Tk):
             messagebox.showerror("Chat", "Not connected to chat server")
             return
         
-        message = self.message_var.get().strip()
+        message = self.message_input.get("1.0", tk.END).strip()
         if not message:
             return
         
         language = self.user_language_var.get()
         if self.chat_client.send_message(message, language):
-            self.message_var.set("")  # Clear input
+            self.message_input.delete("1.0", tk.END)
+            self.message_input.focus_set()
             # Display own message immediately
             self._append_chat(self.username_var.get(), message, is_own=True)
         else:
             messagebox.showerror("Chat", "Failed to send message")
+
+    def _on_message_return(self, event) -> str | None:
+        """Handle Return key in the message box; Shift+Enter inserts newline."""
+        if event.state & 0x0001:  # Shift modifier is active
+            return None
+        self._send_chat_message()
+        return "break"
 
     def _on_chat_message_received(self, message) -> None:
         """Handle incoming chat message"""
