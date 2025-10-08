@@ -293,11 +293,20 @@ class LauncherApp(tk.Tk):
         client_frame.pack(fill=tk.X, padx=10, pady=5)
 
         row = 0
+        ttk.Label(client_frame, text="Server Host:").grid(row=row, column=0, sticky=tk.W, pady=4)
+        self.client_host_var = tk.StringVar(value="localhost")
+        ttk.Entry(client_frame, textvariable=self.client_host_var, width=15).grid(row=row, column=1, sticky=tk.W, padx=5)
+        
+        ttk.Label(client_frame, text="Port:").grid(row=row, column=2, sticky=tk.W, pady=4, padx=(10,0))
+        self.client_port_var = tk.StringVar(value="8888")
+        ttk.Entry(client_frame, textvariable=self.client_port_var, width=8).grid(row=row, column=3, sticky=tk.W, padx=5)
+        
+        row += 1
         ttk.Label(client_frame, text="Username:").grid(row=row, column=0, sticky=tk.W, pady=4)
         self.username_var = tk.StringVar(value=f"User_{os.getpid()}")
         ttk.Entry(client_frame, textvariable=self.username_var, width=15).grid(row=row, column=1, sticky=tk.W, padx=5)
         
-        ttk.Label(client_frame, text="Language:").grid(row=row, column=2, sticky=tk.W, pady=4, padx=(20,0))
+        ttk.Label(client_frame, text="Language:").grid(row=row, column=2, sticky=tk.W, pady=4, padx=(10,0))
         self.user_language_var = tk.StringVar(value="en")
         language_combo = ttk.Combobox(
             client_frame,
@@ -370,8 +379,8 @@ class LauncherApp(tk.Tk):
         try:
             from chat_client import ChatClient
             
-            host = "localhost"  # Connect to local server
-            port = int(self.server_port_var.get().strip())
+            host = self.client_host_var.get().strip()
+            port = int(self.client_port_var.get().strip())
             
             self.chat_client = ChatClient(server_host=host, server_port=port)
             self.chat_client.set_user_name(self.username_var.get().strip())
@@ -380,14 +389,14 @@ class LauncherApp(tk.Tk):
             
             if self.chat_client.connect():
                 self.client_status_var.set("Client: Connected")
-                self._append_log(f"Chat client connected as {self.username_var.get()}\n")
+                self._append_log(f"Chat client connected to {host}:{port} as {self.username_var.get()}\n")
                 self._append_chat("System", f"Connected to chat as {self.username_var.get()}")
             else:
                 self.client_status_var.set("Client: Connection failed")
-                messagebox.showerror("Chat Client", "Failed to connect to chat server")
+                messagebox.showerror("Chat Client", f"Failed to connect to {host}:{port}")
                 
         except Exception as e:
-            messagebox.showerror("Chat Client", f"Error connecting: {e}")
+            messagebox.showerror("Chat Client", f"Error connecting to {self.client_host_var.get()}:{self.client_port_var.get()}: {e}")
             self.client_status_var.set("Client: Error")
 
     def _disconnect_chat_client(self) -> None:
