@@ -14,9 +14,10 @@ class ReceivedMessage:
     sender: str
     original_text: str
     original_language: str
-    translated_text: str
-    timestamp: float
-    message_id: str
+    translated_text: str = ""
+    timestamp: float = 0.0
+    message_id: str = ""
+    target_language: Optional[str] = None
 
 
 class ChatClient:
@@ -32,6 +33,7 @@ class ChatClient:
         self.history_callback: Optional[Callable] = None
         self.user_name = f"User_{uuid.uuid4().hex[:8]}"
         self.preferred_language = "en"
+        self.translation_service = TranslationService()
         
     def set_user_name(self, name: str):
         """Set the user's display name"""
@@ -139,14 +141,20 @@ class ChatClient:
             message_type = message_data.get('type')
             
             if message_type == 'chat_message':
+                target_lang = self.preferred_language or message_data.get('language', 'en')
                 # Create received message object
                 received_msg = ReceivedMessage(
                     sender=message_data.get('sender', 'Unknown'),
                     original_text=message_data['text'],
                     original_language=message_data.get('language', 'en'),
-                    translated_text='',  # Will be set by translation service
                     timestamp=message_data.get('timestamp', time.time()),
-                    message_id=message_data.get('message_id', str(uuid.uuid4()))
+                    message_id=message_data.get('message_id', str(uuid.uuid4())),
+                    target_language=target_lang
+                )
+                received_msg.translated_text = self.translation_service.translate_text(
+                    received_msg.original_text,
+                    received_msg.original_language,
+                    target_lang
                 )
                 
                 # Call message callback if set
@@ -158,13 +166,19 @@ class ChatClient:
                 if self.history_callback:
                     messages = []
                     for msg_data in message_data.get('messages', []):
+                        target_lang = self.preferred_language or msg_data.get('language', 'en')
                         msg = ReceivedMessage(
                             sender=msg_data.get('sender', 'Unknown'),
                             original_text=msg_data['text'],
                             original_language=msg_data.get('language', 'en'),
-                            translated_text='',
                             timestamp=msg_data.get('timestamp', time.time()),
-                            message_id=msg_data.get('message_id', str(uuid.uuid4()))
+                            message_id=msg_data.get('message_id', str(uuid.uuid4())),
+                            target_language=target_lang
+                        )
+                        msg.translated_text = self.translation_service.translate_text(
+                            msg.original_text,
+                            msg.original_language,
+                            target_lang
                         )
                         messages.append(msg)
                     self.history_callback(messages)
@@ -212,23 +226,30 @@ class TranslationService:
         Translate text using the configured LLM API
         Returns the translated text or original text if translation fails
         """
+        normalized_text = text.strip()
+        if not normalized_text:
+            return ""
         if source_lang == target_lang:
             return text
         
         try:
-            # Import the translation function from existing infrastructure
-            from core.translate_lines import translate_lines
-            
-            # Use the existing translation infrastructure
-            translated_text, _ = translate_lines(
-                text, 
-                previous_content_prompt=None,
-                after_cotent_prompt=None,
-                things_to_note_prompt=None,
-                summary_prompt=None
+            from core.utils import ask_gpt
+
+            source_name = self.get_language_name(source_lang)
+            target_name = self.get_language_name(target_lang)
+            prompt = (
+                "You are a professional translator. "
+                f"Translate the following text from {source_name} ({source_lang}) "
+                f"to {target_name} ({target_lang}). "
+                "Preserve the meaning and keep line breaks the same as the input. "
+                "Return only the translated text without additional commentary.\n\n"
+                "<text>\n"
+                f"{text}\n"
+                "</text>"
             )
-            
-            return translated_text
+
+            translated_text = ask_gpt(prompt, resp_type=None, log_title="chat_translate")
+            return translated_text.strip()
             
         except Exception as e:
             print(f"Translation failed: {e}")

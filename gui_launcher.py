@@ -14,6 +14,16 @@ from tkinter import ttk, filedialog, messagebox
 from tkinter.scrolledtext import ScrolledText
 from datetime import datetime
 
+LANGUAGE_NAMES = {
+    "en": "English",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ru": "Russian",
+    "it": "Italian",
+}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -312,11 +322,12 @@ class LauncherApp(tk.Tk):
         language_combo = ttk.Combobox(
             client_frame,
             textvariable=self.user_language_var,
-            values=["en", "zh", "ja", "es", "fr", "de", "ru", "it"],
+            values=list(LANGUAGE_NAMES.keys()),
             state="readonly",
             width=10,
         )
         language_combo.grid(row=row, column=3, sticky=tk.W, padx=5)
+        language_combo.bind("<<ComboboxSelected>>", self._on_language_change)
         
         self.client_status_var = tk.StringVar(value="Client: Disconnected")
         ttk.Label(client_frame, textvariable=self.client_status_var).grid(row=row, column=4, sticky=tk.W, padx=20)
@@ -427,8 +438,6 @@ class LauncherApp(tk.Tk):
         if self.chat_client.send_message(message, language):
             self.message_input.delete("1.0", tk.END)
             self.message_input.focus_set()
-            # Display own message immediately
-            self._append_chat(self.username_var.get(), message, is_own=True)
         else:
             messagebox.showerror("Chat", "Failed to send message")
 
@@ -439,36 +448,35 @@ class LauncherApp(tk.Tk):
         self._send_chat_message()
         return "break"
 
+    def _on_language_change(self, _event=None) -> None:
+        """Update preferred language for chat translations."""
+        if self.chat_client:
+            self.chat_client.set_preferred_language(self.user_language_var.get())
+
     def _on_chat_message_received(self, message) -> None:
         """Handle incoming chat message"""
         # This runs in a separate thread, so we need to use thread-safe GUI updates
         def update_gui():
             try:
-                # Try to translate the message to user's preferred language
-                original_text = message.original_text
-                original_lang = message.original_language
-                user_lang = self.user_language_var.get()
-                
-                display_text = original_text
-                
-                # Only translate if languages are different
-                if original_lang != user_lang:
-                    try:
-                        # Use existing translation infrastructure
-                        from core.translate_lines import translate_lines
-                        translated_text, _ = translate_lines(
-                            original_text,
-                            previous_content_prompt=None,
-                            after_cotent_prompt=None,
-                            things_to_note_prompt=None,
-                            summary_prompt=None
-                        )
-                        display_text = f"{original_text}\n[Translated to {user_lang}]: {translated_text}"
-                    except Exception as e:
-                        print(f"Translation failed: {e}")
-                        display_text = f"{original_text}\n[Original in {original_lang}]"
-                
-                self._append_chat(message.sender, display_text)
+                lines = []
+                original_text = message.original_text or ""
+                original_lang = getattr(message, "original_language", "") or ""
+                target_lang = getattr(message, "target_language", None) or self.user_language_var.get()
+                translated_text = (getattr(message, "translated_text", "") or "").strip()
+                username = self.username_var.get().strip()
+
+                lines.append(original_text)
+
+                if translated_text and translated_text != original_text.strip():
+                    target_label = LANGUAGE_NAMES.get(target_lang, target_lang)
+                    lines.append(f"[{target_label}] {translated_text}")
+                elif original_lang and target_lang and original_lang != target_lang:
+                    target_label = LANGUAGE_NAMES.get(target_lang, target_lang)
+                    lines.append(f"[{target_label}] (translation unavailable)")
+
+                display_text = "\n".join(lines)
+                is_own = message.sender == username
+                self._append_chat(message.sender, display_text, is_own=is_own)
                 
             except Exception as e:
                 print(f"Error processing chat message: {e}")
