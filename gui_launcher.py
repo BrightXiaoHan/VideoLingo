@@ -40,6 +40,10 @@ class LauncherApp(tk.Tk):
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+        chat_frame = ttk.Frame(notebook)
+        self._build_chat_tab(chat_frame)
+        notebook.add(chat_frame, text="LAN Chat")
+
         realtime_frame = ttk.Frame(notebook)
         self._build_realtime_tab(realtime_frame)
         notebook.add(realtime_frame, text="Realtime")
@@ -51,10 +55,7 @@ class LauncherApp(tk.Tk):
         main_frame = ttk.Frame(notebook)
         self._build_main_tab(main_frame)
         notebook.add(main_frame, text="Main Pipeline")
-
-        chat_frame = ttk.Frame(notebook)
-        self._build_chat_tab(chat_frame)
-        notebook.add(chat_frame, text="LAN Chat")
+        notebook.select(chat_frame)
 
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X, padx=10, pady=(0, 10))
@@ -345,6 +346,7 @@ class LauncherApp(tk.Tk):
         message_frame.grid_columnconfigure(1, weight=1)
         message_frame.grid_columnconfigure(2, weight=1)
         message_frame.grid_rowconfigure(1, weight=1)
+        self.after_idle(self.message_input.focus_set)
 
     # ---------
     # Chat handlers
