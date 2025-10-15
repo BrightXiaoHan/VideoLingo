@@ -400,12 +400,14 @@ if INTERNAL_PLAYER_AVAILABLE:
             fps = cap.get(cv2.CAP_PROP_FPS)
             if fps <= 0:
                 fps = 25.0
-            wait_ms = max(int(round(1000.0 / fps)), 1)
+            frame_delay = 1.0 / fps
 
             self._last_frame = None
             stop_event = threading.Event()
             audio_thread = None
             audio_segment = self._load_audio(video_path)
+            audio_start_time = None
+            
             if audio_segment is not None:
                 audio_thread = threading.Thread(
                     target=self._play_audio_stream,
@@ -413,18 +415,39 @@ if INTERNAL_PLAYER_AVAILABLE:
                     daemon=True,
                 )
                 audio_thread.start()
+                audio_start_time = time.time()
 
             frames_played = 0
             last_frame = None
+            video_start_time = time.time()
             try:
                 while True:
+                    frame_start_time = time.time()
                     ret, frame = cap.read()
                     if not ret:
                         break
+                    
                     cv2.imshow(self.window_name, frame)
                     last_frame = frame
                     frames_played += 1
-                    if self._handle_window_events(wait_ms):
+                    
+                    # Calculate precise timing for sync
+                    if audio_start_time is not None:
+                        # Sync video to audio timing
+                        expected_frame_time = audio_start_time + (frames_played * frame_delay)
+                        current_time = time.time()
+                        sleep_time = expected_frame_time - current_time
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
+                    else:
+                        # Fallback to FPS-based timing
+                        wait_ms = max(int(round(1000.0 * frame_delay)), 1)
+                        if self._handle_window_events(wait_ms):
+                            stop_event.set()
+                            break
+                        continue
+                    
+                    if self._handle_window_events(1):
                         stop_event.set()
                         break
             finally:
