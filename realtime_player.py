@@ -271,6 +271,7 @@ if INTERNAL_PLAYER_AVAILABLE:
             self._should_stop = False
             self._audio_available = False
             self._audio_warnings = set()
+            self._last_frame = None
             self.pa = None
             if pyaudio is not None:
                 try:
@@ -293,6 +294,7 @@ if INTERNAL_PLAYER_AVAILABLE:
                 except cv2.error:
                     pass
                 self._window_created = False
+            self._last_frame = None
             if self.pa is not None:
                 try:
                     self.pa.terminate()
@@ -400,6 +402,7 @@ if INTERNAL_PLAYER_AVAILABLE:
                 fps = 25.0
             wait_ms = max(int(round(1000.0 / fps)), 1)
 
+            self._last_frame = None
             stop_event = threading.Event()
             audio_thread = None
             audio_segment = self._load_audio(video_path)
@@ -437,7 +440,8 @@ if INTERNAL_PLAYER_AVAILABLE:
                 print(f"⚠️  Segment contained no frames: {video_path}")
                 return False
             if last_frame is not None:
-                cv2.imshow(self.window_name, last_frame)
+                self._last_frame = last_frame.copy()
+                cv2.imshow(self.window_name, self._last_frame)
                 self._handle_window_events(1)
             return True
 
@@ -448,6 +452,8 @@ if INTERNAL_PLAYER_AVAILABLE:
                 if not self._window_created:
                     time.sleep(min(remaining, 0.05))
                     continue
+                if self._last_frame is not None:
+                    cv2.imshow(self.window_name, self._last_frame)
                 wait_ms = int(min(remaining, 0.05) * 1000)
                 if wait_ms <= 0:
                     wait_ms = 1
