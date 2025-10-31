@@ -5,6 +5,7 @@ import subprocess
 import time
 import datetime
 import platform
+import shutil
 
 
 # ------------
@@ -18,6 +19,77 @@ def timestamp_now():
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path, exist_ok=True)
+
+
+def sanitize_identifier(name):
+    cleaned = []
+    for ch in name:
+        if ch.isalnum():
+            cleaned.append(ch.lower())
+        elif ch in ("-", "_"):
+            cleaned.append(ch)
+        else:
+            cleaned.append("-")
+    result = "".join(cleaned).strip("-_")
+    if not result:
+        result = "config"
+    return result
+
+
+def prepare_config_infos(config_paths, base_output):
+    if not config_paths:
+        config_paths = ["config.yaml"]
+    timestamp = timestamp_now()
+    multiple = len(config_paths) > 1
+    used_names = set()
+    infos = []
+    for idx, config_path in enumerate(config_paths):
+        base_name = os.path.splitext(os.path.basename(config_path))[0]
+        if not base_name:
+            base_name = f"config{idx + 1}"
+        identifier_base = sanitize_identifier(base_name)
+        identifier = identifier_base
+        suffix = 2
+        while identifier in used_names:
+            identifier = f"{identifier_base}_{suffix}"
+            suffix += 1
+        used_names.add(identifier)
+        if multiple:
+            session_name = f"session_{timestamp}_{identifier}"
+        else:
+            session_name = f"session_{timestamp}"
+        session_dir = os.path.join(base_output, session_name)
+        ensure_dir(session_dir)
+        infos.append(
+            {
+                "config_path": config_path,
+                "identifier": identifier,
+                "session_dir": session_dir,
+                "timestamp": timestamp,
+                "jobs": [],
+                "finished_map": {},
+                "playback_state": {"current": None, "next_index": 0},
+            }
+        )
+    return infos
+
+
+def print_session_overview(config_infos):
+    if len(config_infos) == 1:
+        print(f"Session dir: {config_infos[0]['session_dir']}")
+    else:
+        print("Session dirs:")
+        for info in config_infos:
+            print(f"  [{info['identifier']}] {info['session_dir']}")
+
+
+def replicate_segment_source(src_path, dest_path):
+    if os.path.exists(dest_path):
+        os.remove(dest_path)
+    try:
+        os.link(src_path, dest_path)
+    except Exception:
+        shutil.copy2(src_path, dest_path)
 
 
 def run_cmd(cmd, cwd=None, env=None, out_path=None, err_path=None):
@@ -171,7 +243,8 @@ def start_segment_pipeline_async(segment_dir, config_path):
     return {"proc": proc, "dir": segment_dir, "out": log_out, "err": log_err, "done": False}
 
 
-def poll_jobs_and_collect(jobs, finished_map):
+def poll_jobs_and_collect(jobs, finished_map, prefix=None):
+    label = f"[{prefix}] " if prefix else ""
     for job in jobs:
         if job["done"]:
             continue
@@ -188,9 +261,9 @@ def poll_jobs_and_collect(jobs, finished_map):
         index = int(os.path.basename(seg_dir).split("_")[-1])
         if os.path.exists(out_video) and os.path.getsize(out_video) > 0 and ret == 0:
             finished_map[index] = out_video
-            print(f"Done: {out_video}")
+            print(f"{label}Done: {out_video}")
         else:
-            print(f"Pipeline failed for segment {index}")
+            print(f"{label}Pipeline failed for segment {index}")
 
 
 def try_close(fh):
@@ -246,8 +319,9 @@ def start_playback(video_path):
     return subprocess.Popen(["ffplay", "-autoexit", video_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def handle_sequential_playback(finished_map, playback_state):
+def handle_sequential_playback(finished_map, playback_state, prefix=None):
     # playback_state: {"current": Popen or None, "next_index": int}
+    label = f"[{prefix}] " if prefix else ""
     current = playback_state.get("current")
     if current is not None:
         if current.poll() is None:
@@ -255,7 +329,9 @@ def handle_sequential_playback(finished_map, playback_state):
         playback_state["current"] = None
     next_idx = playback_state.get("next_index", 0)
     if next_idx in finished_map and playback_state.get("current") is None:
-        proc = start_playback(finished_map[next_idx])
+        video_path = finished_map[next_idx]
+        print(f"▶️  {label}Playing {video_path}")
+        proc = start_playback(video_path)
         playback_state["current"] = proc
         playback_state["next_index"] = next_idx + 1
 
@@ -407,30 +483,62 @@ def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, sess
 # File source pipeline
 # ------------
 
-def process_file_source(source_path, base_output, config_path, segment_seconds, silence_window, silence_db, silence_min_dur, play_after_each, max_concurrency):
-    session_dir = os.path.join(base_output, f"session_{timestamp_now()}")
-    ensure_dir(session_dir)
-    print(f"Session dir: {session_dir}")
+def process_file_source(
+    source_path,
+    base_output,
+    config_paths,
+    segment_seconds,
+    silence_window,
+    silence_db,
+    silence_min_dur,
+    play_after_each,
+    max_concurrency,
+):
+    config_infos = prepare_config_infos(config_paths, base_output)
+    print_session_overview(config_infos)
+    use_labels = len(config_infos) > 1
 
+    primary_info = config_infos[0]
     total = ffprobe_duration_seconds(
         source_path,
-        out_path=os.path.join(session_dir, "ffprobe_duration.out"),
-        err_path=os.path.join(session_dir, "ffprobe_duration.err"),
+        out_path=os.path.join(primary_info["session_dir"], "ffprobe_duration.out"),
+        err_path=os.path.join(primary_info["session_dir"], "ffprobe_duration.err"),
     )
     print(f"Source duration: {total:.2f}s")
     if total <= 0.0:
         print("Invalid source duration")
         return 1
 
+    # Generate diagnostic logs for additional configs
+    for extra in config_infos[1:]:
+        ffprobe_duration_seconds(
+            source_path,
+            out_path=os.path.join(extra["session_dir"], "ffprobe_duration.out"),
+            err_path=os.path.join(extra["session_dir"], "ffprobe_duration.err"),
+        )
+
+    def poll_all():
+        for info in config_infos:
+            prefix = info["identifier"] if use_labels else None
+            poll_jobs_and_collect(info["jobs"], info["finished_map"], prefix=prefix)
+            if play_after_each:
+                handle_sequential_playback(info["finished_map"], info["playback_state"], prefix=prefix)
+
+    def wait_for_capacity(target_info):
+        while sum(1 for j in target_info["jobs"] if not j["done"]) >= max_concurrency:
+            poll_all()
+            time.sleep(0.5)
+
     current_start = 0.0
     seg_index = 0
-    jobs = []
-    finished_map = {}
-    playback_state = {"current": None, "next_index": 0}
 
     while current_start < total:
-        seg_dir = os.path.join(session_dir, f"seg_{seg_index:04d}")
-        ensure_dir(seg_dir)
+        seg_dirs = {}
+        for info in config_infos:
+            seg_dir = os.path.join(info["session_dir"], f"seg_{seg_index:04d}")
+            ensure_dir(seg_dir)
+            seg_dirs[info["identifier"]] = seg_dir
+
         proposed_end = min(total, current_start + segment_seconds)
         adjusted_end = proposed_end
         if silence_window > 0.0 and proposed_end < total:
@@ -440,58 +548,60 @@ def process_file_source(source_path, base_output, config_path, segment_seconds, 
                 silence_window,
                 silence_db,
                 silence_min_dur,
-                err_log_path=os.path.join(seg_dir, "silence.err"),
+                err_log_path=os.path.join(seg_dirs[primary_info["identifier"]], "silence.err"),
             )
             if adjusted_end <= current_start + 1.0:
                 adjusted_end = proposed_end
 
-        seg_src = os.path.join(seg_dir, "source.mp4")
-        ok = extract_segment(source_path, current_start, adjusted_end, seg_src, log_dir=seg_dir)
+        seg_src_primary = os.path.join(seg_dirs[primary_info["identifier"]], "source.mp4")
+        ok = extract_segment(
+            source_path,
+            current_start,
+            adjusted_end,
+            seg_src_primary,
+            log_dir=seg_dirs[primary_info["identifier"]],
+        )
         if not ok:
             print(f"Failed to extract segment {seg_index}")
             return 2
 
-        # throttle concurrency
-        while sum(1 for j in jobs if not j["done"]) >= max_concurrency:
-            poll_jobs_and_collect(jobs, finished_map)
-            if play_after_each:
-                handle_sequential_playback(finished_map, playback_state)
-            time.sleep(0.5)
+        for info in config_infos[1:]:
+            dest = os.path.join(seg_dirs[info["identifier"]], "source.mp4")
+            replicate_segment_source(seg_src_primary, dest)
 
-        job = start_segment_pipeline_async(seg_dir, config_path)
-        jobs.append(job)
+        for info in config_infos:
+            wait_for_capacity(info)
+            seg_dir = seg_dirs[info["identifier"]]
+            job = start_segment_pipeline_async(seg_dir, info["config_path"])
+            info["jobs"].append(job)
 
-        # brief poll to handle any completed jobs
-        poll_jobs_and_collect(jobs, finished_map)
-        if play_after_each:
-            handle_sequential_playback(finished_map, playback_state)
+        poll_all()
 
         seg_index += 1
         current_start = adjusted_end
         if current_start >= total:
             break
 
-    # wait for all jobs to finish
-    while any(not j["done"] for j in jobs):
-        poll_jobs_and_collect(jobs, finished_map)
-        if play_after_each:
-            handle_sequential_playback(finished_map, playback_state)
+    while any(not job["done"] for info in config_infos for job in info["jobs"]):
+        poll_all()
         time.sleep(0.5)
 
-    # continue playing remaining segments after all jobs are done
     if play_after_each:
-        while playback_state.get("next_index", 0) < seg_index:
-            handle_sequential_playback(finished_map, playback_state)
-            time.sleep(0.5)
-        # wait for the final segment to finish playing
-        if playback_state.get("current") is not None and playback_state["current"].poll() is None:
-            playback_state["current"].wait()
+        for info in config_infos:
+            prefix = info["identifier"] if use_labels else None
+            while info["playback_state"].get("next_index", 0) < seg_index:
+                handle_sequential_playback(info["finished_map"], info["playback_state"], prefix=prefix)
+                time.sleep(0.5)
+            current = info["playback_state"].get("current")
+            if current is not None and current.poll() is None:
+                current.wait()
 
-    # collect dubbed videos in order
-    indices = sorted(finished_map.keys())
-    dubbed_videos = [finished_map[i] for i in indices]
-    final_out = os.path.join(session_dir, "final_dub.mp4")
-    concat_segments(final_out, dubbed_videos, log_dir=session_dir)
+    for info in config_infos:
+        indices = sorted(info["finished_map"].keys())
+        dubbed_videos = [info["finished_map"][i] for i in indices]
+        final_out = os.path.join(info["session_dir"], "final_dub.mp4")
+        concat_segments(final_out, dubbed_videos, log_dir=info["session_dir"])
+
     return 0
 
 
@@ -585,41 +695,58 @@ def validate_video_file(video_path):
     return True
 
 
-def process_camera_source(camera_spec, base_output, config_path, segment_seconds, play_after_each, max_segments, max_concurrency, audio_device="default"):
-    session_dir = os.path.join(base_output, f"session_{timestamp_now()}")
-    ensure_dir(session_dir)
-    print(f"Session dir: {session_dir}")
+def process_camera_source(
+    camera_spec,
+    base_output,
+    config_paths,
+    segment_seconds,
+    play_after_each,
+    max_segments,
+    max_concurrency,
+    audio_device="default",
+):
+    config_infos = prepare_config_infos(config_paths, base_output)
+    print_session_overview(config_infos)
+    use_labels = len(config_infos) > 1
 
-    seg_pattern = os.path.join(session_dir, "live_%04d.mp4")
-    cmd = build_camera_capture_cmd(camera_spec, seg_pattern, segment_seconds, session_dir, audio_device)
+    primary_info = config_infos[0]
+    seg_pattern = os.path.join(primary_info["session_dir"], "live_%04d.mp4")
+    cmd = build_camera_capture_cmd(camera_spec, seg_pattern, segment_seconds, primary_info["session_dir"], audio_device)
     print("Starting live capture...")
     print(f"Capture command: {' '.join(cmd)}")
-    capture_out = open(os.path.join(session_dir, "capture.out"), "w", encoding="utf-8")
-    capture_err = open(os.path.join(session_dir, "capture.err"), "w", encoding="utf-8")
+    capture_out = open(os.path.join(primary_info["session_dir"], "capture.out"), "w", encoding="utf-8")
+    capture_err = open(os.path.join(primary_info["session_dir"], "capture.err"), "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, stdout=capture_out, stderr=capture_err, text=True)
-    
-    # Give FFmpeg a moment to start up
+
     time.sleep(2)
     if proc.poll() is not None:
         capture_out.close()
         capture_err.close()
-        # Read error output
-        with open(os.path.join(session_dir, "capture.err"), "r", encoding="utf-8") as f:
-            err_content = f.read()
-        print(f"❌ FFmpeg capture failed immediately:")
+        with open(os.path.join(primary_info["session_dir"], "capture.err"), "r", encoding="utf-8") as fh:
+            err_content = fh.read()
+        print("❌ FFmpeg capture failed immediately:")
         print(f"Exit code: {proc.returncode}")
         print(f"Error output: {err_content}")
         return proc.returncode
 
+    def poll_all():
+        for info in config_infos:
+            prefix = info["identifier"] if use_labels else None
+            poll_jobs_and_collect(info["jobs"], info["finished_map"], prefix=prefix)
+            if play_after_each:
+                handle_sequential_playback(info["finished_map"], info["playback_state"], prefix=prefix)
+
+    def wait_for_capacity(target_info):
+        while sum(1 for j in target_info["jobs"] if not j["done"]) >= max_concurrency:
+            poll_all()
+            time.sleep(0.5)
+
     processed = 0
     seen = set()
-    jobs = []
-    finished_map = {}
-    playback_state = {"current": None, "next_index": 0}
 
     while True:
-        time.sleep(2.0)  # Longer interval to let FFmpeg finish writing
-        files = list_dir_sorted_by_index(session_dir, "live_")
+        time.sleep(2.0)
+        files = list_dir_sorted_by_index(primary_info["session_dir"], "live_")
         for f in files:
             if f in seen:
                 continue
@@ -627,40 +754,37 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
                 continue
             seen.add(f)
 
-            seg_dir = os.path.join(session_dir, f"seg_{processed:04d}")
-            ensure_dir(seg_dir)
-            seg_src = os.path.join(seg_dir, "source.mp4")
-            
-            # Move first, then validate (file is more stable after move)
-            os.replace(f, seg_src)
-            
-            # Validate moved file
-            if not validate_video_file(seg_src):
-                print(f"⚠️  Warning: Captured file {seg_src} may have issues, but continuing...")
+            seg_dirs = {}
+            for info in config_infos:
+                seg_dir = os.path.join(info["session_dir"], f"seg_{processed:04d}")
+                ensure_dir(seg_dir)
+                seg_dirs[info["identifier"]] = seg_dir
+
+            seg_src_primary = os.path.join(seg_dirs[primary_info["identifier"]], "source.mp4")
+            os.replace(f, seg_src_primary)
+
+            if not validate_video_file(seg_src_primary):
+                print(f"⚠️  Warning: Captured file {seg_src_primary} may have issues, but continuing...")
             else:
-                print(f"✅ Valid segment captured: {seg_src} ({os.path.getsize(seg_src)} bytes)")
+                print(f"✅ Valid segment captured: {seg_src_primary} ({os.path.getsize(seg_src_primary)} bytes)")
 
-            # throttle concurrency
-            while sum(1 for j in jobs if not j["done"]) >= max_concurrency:
-                poll_jobs_and_collect(jobs, finished_map)
-                if play_after_each:
-                    handle_sequential_playback(finished_map, playback_state)
-                time.sleep(0.5)
+            for info in config_infos[1:]:
+                dest = os.path.join(seg_dirs[info["identifier"]], "source.mp4")
+                replicate_segment_source(seg_src_primary, dest)
 
-            job = start_segment_pipeline_async(seg_dir, config_path)
-            jobs.append(job)
+            for info in config_infos:
+                wait_for_capacity(info)
+                seg_dir = seg_dirs[info["identifier"]]
+                job = start_segment_pipeline_async(seg_dir, info["config_path"])
+                info["jobs"].append(job)
 
-            poll_jobs_and_collect(jobs, finished_map)
-            if play_after_each:
-                handle_sequential_playback(finished_map, playback_state)
+            poll_all()
 
             processed += 1
             if max_segments > 0 and processed >= max_segments:
                 break
 
-        poll_jobs_and_collect(jobs, finished_map)
-        if play_after_each:
-            handle_sequential_playback(finished_map, playback_state)
+        poll_all()
 
         if max_segments > 0 and processed >= max_segments:
             break
@@ -671,19 +795,26 @@ def process_camera_source(camera_spec, base_output, config_path, segment_seconds
     capture_out.close()
     capture_err.close()
 
-    while any(not j["done"] for j in jobs):
-        poll_jobs_and_collect(jobs, finished_map)
-        if play_after_each:
-            handle_sequential_playback(finished_map, playback_state)
+    while any(not job["done"] for info in config_infos for job in info["jobs"]):
+        poll_all()
         time.sleep(0.5)
 
-    if playback_state.get("current") is not None and playback_state["current"].poll() is None:
-        playback_state["current"].wait()
+    if play_after_each:
+        for info in config_infos:
+            prefix = info["identifier"] if use_labels else None
+            while info["playback_state"].get("next_index", 0) < processed:
+                handle_sequential_playback(info["finished_map"], info["playback_state"], prefix=prefix)
+                time.sleep(0.5)
+            current = info["playback_state"].get("current")
+            if current is not None and current.poll() is None:
+                current.wait()
 
-    indices = sorted(finished_map.keys())
-    dubbed_videos = [finished_map[i] for i in indices]
-    final_out = os.path.join(session_dir, "final_dub.mp4")
-    concat_segments(final_out, dubbed_videos, log_dir=session_dir)
+    for info in config_infos:
+        indices = sorted(info["finished_map"].keys())
+        dubbed_videos = [info["finished_map"][i] for i in indices]
+        final_out = os.path.join(info["session_dir"], "final_dub.mp4")
+        concat_segments(final_out, dubbed_videos, log_dir=info["session_dir"])
+
     return 0
 
 
@@ -799,7 +930,13 @@ def main():
     parser.add_argument("--camera-spec", type=str, default="0", help="Camera device spec: '0:0' for macOS avfoundation, '0' or '/dev/video0' for Linux v4l2 (audio from default ALSA), 'USB2.0 Camera' for Windows dshow")
     parser.add_argument("--audio-device", type=str, default="default", help="Audio device for Linux (ALSA device name, e.g., 'default', 'hw:0', 'plughw:1,0')")
     parser.add_argument("--output", type=str, default="output", help="Base output directory")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Config YAML path for main.py")
+    parser.add_argument(
+        "--config",
+        action="append",
+        dest="config",
+        default=None,
+        help="Config YAML path for main.py (repeat for multiple outputs)",
+    )
     parser.add_argument("--segment-seconds", type=int, default=300, help="Segment length in seconds")
     parser.add_argument("--silence-window", type=float, default=10.0, help="Search window around cut (seconds), file mode only")
     parser.add_argument("--silence-db", type=int, default=-35, help="Silence threshold in dB for ffmpeg silencedetect")
@@ -809,6 +946,7 @@ def main():
     parser.add_argument("--max-concurrency", type=int, default=2, help="Max concurrent translation jobs")
 
     args = parser.parse_args()
+    config_paths = args.config if args.config else ["config.yaml"]
 
     if args.mode == "list-cameras":
         os_type = get_os_type()
@@ -832,7 +970,7 @@ def main():
         return process_file_source(
             args.source,
             args.output,
-            args.config,
+            config_paths,
             args.segment_seconds,
             args.silence_window,
             args.silence_db,
@@ -845,7 +983,7 @@ def main():
         return process_camera_source(
             args.camera_spec,
             args.output,
-            args.config,
+            config_paths,
             args.segment_seconds,
             args.play,
             args.max_segments,
@@ -859,4 +997,3 @@ def main():
 if __name__ == "__main__":
     code = main()
     sys.exit(code)
-
