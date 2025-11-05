@@ -255,6 +255,60 @@ def play_video(video_path, player):
     return play_with_default(video_path)
 
 
+class RtspStreamer:
+    """Lightweight wrapper around ffmpeg to push segments as an RTSP stream."""
+
+    def __init__(self, target_url, transport="tcp", listen=False):
+        self.target_url = target_url
+        self.transport = (transport or "tcp").lower()
+        if self.transport not in {"tcp", "udp"}:
+            raise ValueError(f"Unsupported RTSP transport: {transport}")
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path is None:
+            raise RuntimeError("ffmpeg is required for RTSP streaming but was not found in PATH.")
+        self.ffmpeg_path = ffmpeg_path
+        self.listen = listen
+
+    def _build_cmd(self, video_path, reencode_audio=False):
+        cmd = [
+            self.ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-re",
+            "-i",
+            video_path,
+        ]
+        if reencode_audio:
+            cmd.extend(["-c:v", "copy", "-c:a", "aac", "-b:a", "128k"])
+        else:
+            cmd.extend(["-c", "copy"])
+        if self.transport:
+            cmd.extend(["-rtsp_transport", self.transport])
+        if self.listen:
+            cmd.extend(["-rtsp_flags", "listen"])
+        cmd.extend(["-f", "rtsp", self.target_url])
+        return cmd
+
+    def stream_segment(self, video_path):
+        """Stream a single segment via RTSP; returns True on success."""
+        cmd = self._build_cmd(video_path, reencode_audio=False)
+        print(f"📡 Streaming segment via RTSP: {' '.join(cmd)}")
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            return True
+
+        print("⚠️  RTSP streaming with stream copy failed; retrying with AAC audio transcode...")
+        fallback_cmd = self._build_cmd(video_path, reencode_audio=True)
+        print(f"📡 Streaming fallback via RTSP: {' '.join(fallback_cmd)}")
+        fallback = subprocess.run(fallback_cmd)
+        if fallback.returncode == 0:
+            return True
+
+        print("❌ RTSP streaming failed; ffmpeg exited with non-zero status.")
+        return False
+
+
 # ------------
 # Internal continuous player
 # ------------
@@ -491,7 +545,7 @@ else:
 # Main loop
 # ------------
 
-def watch_and_play(shared_base, session_dir, start_index, poll_interval, player):
+def watch_and_play(shared_base, session_dir, start_index, poll_interval, player, rtsp_url=None, rtsp_transport="tcp", rtsp_listen=False):
     if not session_dir:
         print("Detecting latest session directory under base share...")
         while True:
@@ -508,6 +562,7 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
     use_internal = False
     selected_player = player
     segment_player = None
+    rtsp_streamer = None
 
     if player == "internal":
         if not INTERNAL_PLAYER_AVAILABLE or SegmentPlayer is None:
@@ -525,6 +580,18 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
             use_internal = True
         else:
             selected_player = "auto"
+    elif player == "rtsp":
+        resolved_url = rtsp_url or "rtsp://127.0.0.1:8554/videolingo"
+        try:
+            rtsp_streamer = RtspStreamer(resolved_url, transport=rtsp_transport, listen=rtsp_listen)
+        except Exception as exc:
+            print(f"❌ Unable to initialize RTSP streamer: {exc}")
+            return
+        selected_player = "rtsp"
+        print(
+            "📡 RTSP streaming enabled. "
+            f"Target: {resolved_url} (transport={rtsp_transport}, listen={'yes' if rtsp_listen else 'no'})"
+        )
     else:
         selected_player = player
 
@@ -552,7 +619,6 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
     try:
         while True:
             video_path = segment_video_path(session_dir, index)
-            played = False
 
             if stability_tracker.is_stable(video_path):
                 if validate_video_file(video_path):
@@ -568,6 +634,15 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player)
                             continue
                         else:
                             print("❌ Internal player failed, retrying...")
+                    elif rtsp_streamer is not None and selected_player == "rtsp":
+                        ok = rtsp_streamer.stream_segment(video_path)
+                        if ok:
+                            stability_tracker.mark_consumed(video_path)
+                            print(f"✅ Streamed segment {index:04d}")
+                            index += 1
+                            continue
+                        else:
+                            print("❌ RTSP streaming failed, retry in a moment...")
                     else:
                         ok = play_video(video_path, selected_player)
                         if ok:
@@ -603,8 +678,26 @@ def main():
         "--player",
         type=str,
         default="auto",
-        choices=["auto", "internal", "ffplay", "mpv", "vlc", "default"],
+        choices=["auto", "internal", "ffplay", "mpv", "vlc", "default", "rtsp"],
         help="Preferred player (internal uses the built-in OpenCV viewer)",
+    )
+    parser.add_argument(
+        "--rtsp-url",
+        type=str,
+        default="rtsp://127.0.0.1:8554/videolingo",
+        help="Target RTSP URL to publish segments when --player=rtsp",
+    )
+    parser.add_argument(
+        "--rtsp-transport",
+        type=str,
+        default="tcp",
+        choices=["tcp", "udp"],
+        help="Transport protocol used by ffmpeg when pushing RTSP",
+    )
+    parser.add_argument(
+        "--rtsp-listen",
+        action="store_true",
+        help="Make ffmpeg listen for RTSP clients (adds -rtsp_flags listen)",
     )
 
     args = parser.parse_args()
@@ -614,7 +707,16 @@ def main():
         print("Shared base directory does not exist")
         return 1
 
-    watch_and_play(shared_base, args.session_dir, args.start_index, args.poll_interval, args.player)
+    watch_and_play(
+        shared_base,
+        args.session_dir,
+        args.start_index,
+        args.poll_interval,
+        args.player,
+        args.rtsp_url,
+        args.rtsp_transport,
+        args.rtsp_listen,
+    )
     return 0
 
 
