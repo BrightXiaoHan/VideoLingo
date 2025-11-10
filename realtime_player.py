@@ -1,10 +1,13 @@
 import os
 import time
+import math
 import argparse
 import subprocess
 import shutil
 import platform
 import threading
+import functools
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 try:
     import cv2  # type: ignore
@@ -77,6 +80,28 @@ def ffprobe_has_video_stream(path):
     if proc.returncode != 0:
         return False
     return len(proc.stdout.strip()) > 0
+
+
+def ffprobe_get_duration(path):
+    if not which("ffprobe"):
+        return 0.0
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        path,
+    ]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        return 0.0
+    try:
+        return float(proc.stdout.strip())
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def validate_video_file(video_path):
@@ -309,6 +334,180 @@ class RtspStreamer:
         return False
 
 
+class QuietHTTPRequestHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, directory=None, **kwargs):
+        super().__init__(*args, directory=directory, **kwargs)
+
+    def log_message(self, fmt, *args):  # pragma: no cover - debug helper
+        print(f"🌐 [HLS HTTP] {self.address_string()} - {fmt % args}")
+
+
+class HlsPublisher:
+    """Convert individual MP4 segments into a rolling HLS playlist."""
+
+    def __init__(
+        self,
+        output_dir,
+        window_size=10,
+        serve_http=True,
+        http_host="0.0.0.0",
+        http_port=8080,
+    ):
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path is None:
+            raise RuntimeError("ffmpeg is required for HLS streaming but was not found in PATH.")
+        self.ffmpeg_path = ffmpeg_path
+        self.output_dir = os.path.abspath(output_dir)
+        ensure_dir(self.output_dir)
+        self.window_size = max(1, int(window_size or 1))
+        self.serve_http = serve_http
+        self.http_host = http_host or "0.0.0.0"
+        self.http_port = int(http_port or 8080)
+        self.playlist_name = "playlist.m3u8"
+        self.playlist_path = os.path.join(self.output_dir, self.playlist_name)
+        self._segments = []
+        self._media_sequence = 0
+        self._http_server = None
+        self._http_thread = None
+        if self.serve_http:
+            self._start_http_server()
+
+    def _start_http_server(self):
+        handler = functools.partial(QuietHTTPRequestHandler, directory=self.output_dir)
+        try:
+            self._http_server = ThreadingHTTPServer((self.http_host, self.http_port), handler)
+        except OSError as exc:
+            raise RuntimeError(f"Unable to start HLS HTTP server on {self.http_host}:{self.http_port} ({exc})")
+        self._http_thread = threading.Thread(
+            target=self._http_server.serve_forever,
+            daemon=True,
+            name="hls-http-server",
+        )
+        self._http_thread.start()
+        display_host = "localhost" if self.http_host in {"0.0.0.0", "::"} else self.http_host
+        print(
+            f"🌐 HLS HTTP server running at "
+            f"http://{display_host}:{self.http_port}/{self.playlist_name}"
+        )
+
+    def _remux_to_ts(self, video_path, ts_path):
+        base_cmd = [
+            self.ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-y",
+            "-i",
+            video_path,
+            "-c",
+            "copy",
+            "-bsf:v",
+            "h264_mp4toannexb",
+            "-f",
+            "mpegts",
+            ts_path,
+        ]
+        result = subprocess.run(base_cmd)
+        if result.returncode == 0:
+            return True
+
+        fallback_cmd = [
+            self.ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-y",
+            "-i",
+            video_path,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-profile:v",
+            "main",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-f",
+            "mpegts",
+            ts_path,
+        ]
+        fallback = subprocess.run(fallback_cmd)
+        if fallback.returncode == 0:
+            return True
+
+        print("❌ Failed to convert segment to MPEG-TS for HLS output.")
+        return False
+
+    def _append_segment(self, uri, duration):
+        duration = max(float(duration or 0.0), 0.1)
+        self._segments.append({"uri": uri, "duration": duration})
+        while len(self._segments) > self.window_size:
+            removed = self._segments.pop(0)
+            self._media_sequence += 1
+            try:
+                os.remove(os.path.join(self.output_dir, removed["uri"]))
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                print(f"⚠️  Unable to remove old HLS segment {removed['uri']}: {exc}")
+        self._write_playlist()
+
+    def _write_playlist(self):
+        if not self._segments:
+            return
+        target = max(
+            1,
+            int(math.ceil(max(seg["duration"] for seg in self._segments))),
+        )
+        lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:3",
+            f"#EXT-X-TARGETDURATION:{target}",
+            f"#EXT-X-MEDIA-SEQUENCE:{self._media_sequence}",
+            "#EXT-X-PLAYLIST-TYPE:EVENT",
+        ]
+        for idx, seg in enumerate(self._segments):
+            if idx > 0:
+                lines.append("#EXT-X-DISCONTINUITY")
+            lines.append(f"#EXTINF:{seg['duration']:.3f},")
+            lines.append(seg["uri"])
+        tmp_path = self.playlist_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        os.replace(tmp_path, self.playlist_path)
+
+    def publish_segment(self, video_path, index):
+        ts_name = f"segment_{index:04d}.ts"
+        ts_path = os.path.join(self.output_dir, ts_name)
+        if not self._remux_to_ts(video_path, ts_path):
+            return False
+        duration = ffprobe_get_duration(video_path)
+        if duration <= 0:
+            duration = 4.0
+        self._append_segment(ts_name, duration)
+        print(f"✅ HLS segment ready: {ts_name} (~{duration:.2f}s)")
+        return True
+
+    def playlist_url(self):
+        host = "localhost" if self.http_host in {"0.0.0.0", "::"} else self.http_host
+        return f"http://{host}:{self.http_port}/{self.playlist_name}"
+
+    def close(self):
+        if self._http_server is not None:
+            try:
+                self._http_server.shutdown()
+            except Exception:
+                pass
+            if self._http_thread is not None:
+                self._http_thread.join(timeout=2.0)
+            try:
+                self._http_server.server_close()
+            except Exception:
+                pass
+            self._http_server = None
+            self._http_thread = None
 # ------------
 # Internal continuous player
 # ------------
@@ -545,7 +744,21 @@ else:
 # Main loop
 # ------------
 
-def watch_and_play(shared_base, session_dir, start_index, poll_interval, player, rtsp_url=None, rtsp_transport="tcp", rtsp_listen=False):
+def watch_and_play(
+    shared_base,
+    session_dir,
+    start_index,
+    poll_interval,
+    player,
+    rtsp_url=None,
+    rtsp_transport="tcp",
+    rtsp_listen=False,
+    hls_output_dir=None,
+    hls_window_size=10,
+    hls_http_host="0.0.0.0",
+    hls_http_port=8080,
+    hls_disable_http=False,
+):
     if not session_dir:
         print("Detecting latest session directory under base share...")
         while True:
@@ -563,6 +776,7 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player,
     selected_player = player
     segment_player = None
     rtsp_streamer = None
+    hls_publisher = None
 
     if player == "internal":
         if not INTERNAL_PLAYER_AVAILABLE or SegmentPlayer is None:
@@ -592,6 +806,24 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player,
             "📡 RTSP streaming enabled. "
             f"Target: {resolved_url} (transport={rtsp_transport}, listen={'yes' if rtsp_listen else 'no'})"
         )
+    elif player == "hls":
+        output_dir = hls_output_dir or os.path.join(shared_base, "hls_stream")
+        try:
+            hls_publisher = HlsPublisher(
+                output_dir,
+                window_size=hls_window_size,
+                serve_http=not hls_disable_http,
+                http_host=hls_http_host,
+                http_port=hls_http_port,
+            )
+        except Exception as exc:
+            print(f"❌ Unable to initialize HLS publisher: {exc}")
+            return
+        selected_player = "hls"
+        if not hls_disable_http:
+            print(f"📺 VLC: Media ▸ Open Network Stream ▸ {hls_publisher.playlist_url()}")
+        else:
+            print(f"📺 HLS playlist ready at {hls_publisher.playlist_path}; serve via your HTTP server.")
     else:
         selected_player = player
 
@@ -643,6 +875,15 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player,
                             continue
                         else:
                             print("❌ RTSP streaming failed, retry in a moment...")
+                    elif hls_publisher is not None and selected_player == "hls":
+                        ok = hls_publisher.publish_segment(video_path, index)
+                        if ok:
+                            stability_tracker.mark_consumed(video_path)
+                            print(f"✅ Added segment {index:04d} to HLS playlist")
+                            index += 1
+                            continue
+                        else:
+                            print("❌ HLS packaging failed, retry in a moment...")
                     else:
                         ok = play_video(video_path, selected_player)
                         if ok:
@@ -662,6 +903,8 @@ def watch_and_play(shared_base, session_dir, start_index, poll_interval, player,
     finally:
         if segment_player is not None:
             segment_player.close()
+        if hls_publisher is not None:
+            hls_publisher.close()
 
 
 # ------------
@@ -678,7 +921,7 @@ def main():
         "--player",
         type=str,
         default="auto",
-        choices=["auto", "internal", "ffplay", "mpv", "vlc", "default", "rtsp"],
+        choices=["auto", "internal", "ffplay", "mpv", "vlc", "default", "rtsp", "hls"],
         help="Preferred player (internal uses the built-in OpenCV viewer)",
     )
     parser.add_argument(
@@ -699,6 +942,35 @@ def main():
         action="store_true",
         help="Make ffmpeg listen for RTSP clients (adds -rtsp_flags listen)",
     )
+    parser.add_argument(
+        "--hls-output-dir",
+        type=str,
+        default="output/hls_stream",
+        help="Directory to store generated HLS playlist and segments",
+    )
+    parser.add_argument(
+        "--hls-window-size",
+        type=int,
+        default=12,
+        help="Rolling window size for HLS playlist (number of retained segments)",
+    )
+    parser.add_argument(
+        "--hls-http-host",
+        type=str,
+        default="0.0.0.0",
+        help="Host/IP for the optional embedded HTTP server that serves HLS files",
+    )
+    parser.add_argument(
+        "--hls-http-port",
+        type=int,
+        default=8080,
+        help="Port for the embedded HLS HTTP server",
+    )
+    parser.add_argument(
+        "--hls-disable-http",
+        action="store_true",
+        help="Disable the built-in HTTP server; serve the HLS directory yourself",
+    )
 
     args = parser.parse_args()
 
@@ -716,6 +988,11 @@ def main():
         args.rtsp_url,
         args.rtsp_transport,
         args.rtsp_listen,
+        args.hls_output_dir,
+        args.hls_window_size,
+        args.hls_http_host,
+        args.hls_http_port,
+        args.hls_disable_http,
     )
     return 0
 
