@@ -69,6 +69,7 @@ def prepare_config_infos(config_paths, base_output):
                 "jobs": [],
                 "finished_map": {},
                 "playback_state": {"current": None, "next_index": 0},
+                "upload_opts": None,
             }
         )
     return infos
@@ -90,6 +91,71 @@ def replicate_segment_source(src_path, dest_path):
         os.link(src_path, dest_path)
     except Exception:
         shutil.copy2(src_path, dest_path)
+
+
+def make_upload_opts(session_dir, upload_dir, upload_cmd):
+    upload_dir = (upload_dir or "").strip()
+    upload_cmd = (upload_cmd or "").strip()
+    if not upload_dir and not upload_cmd:
+        return None
+    return {
+        "session_dir": os.path.abspath(session_dir),
+        "target_dir": upload_dir,
+        "command": upload_cmd,
+    }
+
+
+def perform_segment_upload(src_path, seg_dir, index, upload_opts):
+    if not upload_opts:
+        return
+
+    session_dir = upload_opts.get("session_dir", "")
+    target_root = (upload_opts.get("target_dir") or "").strip()
+    upload_cmd = (upload_opts.get("command") or "").strip()
+    session_name = os.path.basename(session_dir.rstrip(os.sep)) if session_dir else ""
+    segment_name = os.path.basename(seg_dir.rstrip(os.sep))
+    filename = os.path.basename(src_path)
+    dest_path = ""
+
+    if target_root:
+        target_dir = os.path.join(target_root, session_name, segment_name)
+        try:
+            ensure_dir(target_dir)
+            dest_candidate = os.path.join(target_dir, filename)
+            if os.path.abspath(src_path) != os.path.abspath(dest_candidate):
+                shutil.copy2(src_path, dest_candidate)
+                dest_path = dest_candidate
+                print(f"☁️  Mirrored {segment_name} to {dest_candidate}")
+            else:
+                print(f"⚠️  Upload destination matches source for {segment_name}, skipping copy.")
+        except Exception as exc:
+            print(f"⚠️  Failed to copy segment {segment_name} to upload dir: {exc}")
+
+    if upload_cmd:
+        context = {
+            "src": src_path,
+            "dest": dest_path,
+            "session_dir": session_dir,
+            "segment_dir": seg_dir,
+            "session_name": session_name,
+            "segment_name": segment_name,
+            "index": index,
+            "filename": filename,
+        }
+        try:
+            command = upload_cmd.format(**context)
+        except KeyError as exc:
+            print(f"⚠️  Upload command missing placeholder: {exc}")
+            return
+        command = command.strip()
+        if not command:
+            return
+        print(f"☁️  Running segment upload command: {command}")
+        result = subprocess.run(command, shell=True)
+        if result.returncode != 0:
+            print(f"⚠️  Segment upload command failed with code {result.returncode}")
+        else:
+            print("✅ Segment upload command succeeded")
 
 
 def run_cmd(cmd, cwd=None, env=None, out_path=None, err_path=None):
@@ -243,7 +309,7 @@ def start_segment_pipeline_async(segment_dir, config_path):
     return {"proc": proc, "dir": segment_dir, "out": log_out, "err": log_err, "done": False}
 
 
-def poll_jobs_and_collect(jobs, finished_map, prefix=None):
+def poll_jobs_and_collect(jobs, finished_map, prefix=None, upload_opts=None):
     label = f"[{prefix}] " if prefix else ""
     for job in jobs:
         if job["done"]:
@@ -262,6 +328,8 @@ def poll_jobs_and_collect(jobs, finished_map, prefix=None):
         if os.path.exists(out_video) and os.path.getsize(out_video) > 0 and ret == 0:
             finished_map[index] = out_video
             print(f"{label}Done: {out_video}")
+            if upload_opts:
+                perform_segment_upload(out_video, seg_dir, index, upload_opts)
         else:
             print(f"{label}Pipeline failed for segment {index}")
 
@@ -493,10 +561,14 @@ def process_file_source(
     silence_min_dur,
     play_after_each,
     max_concurrency,
+    segment_upload_dir,
+    segment_upload_cmd,
 ):
     config_infos = prepare_config_infos(config_paths, base_output)
     print_session_overview(config_infos)
     use_labels = len(config_infos) > 1
+    for info in config_infos:
+        info["upload_opts"] = make_upload_opts(info["session_dir"], segment_upload_dir, segment_upload_cmd)
 
     primary_info = config_infos[0]
     total = ffprobe_duration_seconds(
@@ -520,7 +592,12 @@ def process_file_source(
     def poll_all():
         for info in config_infos:
             prefix = info["identifier"] if use_labels else None
-            poll_jobs_and_collect(info["jobs"], info["finished_map"], prefix=prefix)
+            poll_jobs_and_collect(
+                info["jobs"],
+                info["finished_map"],
+                prefix=prefix,
+                upload_opts=info.get("upload_opts"),
+            )
             if play_after_each:
                 handle_sequential_playback(info["finished_map"], info["playback_state"], prefix=prefix)
 
@@ -704,10 +781,14 @@ def process_camera_source(
     max_segments,
     max_concurrency,
     audio_device="default",
+    segment_upload_dir="",
+    segment_upload_cmd="",
 ):
     config_infos = prepare_config_infos(config_paths, base_output)
     print_session_overview(config_infos)
     use_labels = len(config_infos) > 1
+    for info in config_infos:
+        info["upload_opts"] = make_upload_opts(info["session_dir"], segment_upload_dir, segment_upload_cmd)
 
     primary_info = config_infos[0]
     seg_pattern = os.path.join(primary_info["session_dir"], "live_%04d.mp4")
@@ -732,7 +813,12 @@ def process_camera_source(
     def poll_all():
         for info in config_infos:
             prefix = info["identifier"] if use_labels else None
-            poll_jobs_and_collect(info["jobs"], info["finished_map"], prefix=prefix)
+            poll_jobs_and_collect(
+                info["jobs"],
+                info["finished_map"],
+                prefix=prefix,
+                upload_opts=info.get("upload_opts"),
+            )
             if play_after_each:
                 handle_sequential_playback(info["finished_map"], info["playback_state"], prefix=prefix)
 
@@ -944,6 +1030,18 @@ def main():
     parser.add_argument("--play", action="store_true", help="Play each dubbed segment after finishing")
     parser.add_argument("--max-segments", type=int, default=0, help="Camera mode: stop after N segments (0 means infinite)")
     parser.add_argument("--max-concurrency", type=int, default=2, help="Max concurrent translation jobs")
+    parser.add_argument(
+        "--segment-upload-dir",
+        type=str,
+        default="",
+        help="Mirror each finished output_dub.mp4 into this directory (session/segment structure preserved)",
+    )
+    parser.add_argument(
+        "--segment-upload-cmd",
+        type=str,
+        default="",
+        help="Shell command to run after each segment is ready; placeholders: {src}, {dest}, {session_dir}, {segment_dir}, {session_name}, {segment_name}, {index}, {filename}",
+    )
 
     args = parser.parse_args()
     config_paths = args.config if args.config else ["config.yaml"]
@@ -977,6 +1075,8 @@ def main():
             args.silence_min_dur,
             args.play,
             args.max_concurrency,
+            args.segment_upload_dir,
+            args.segment_upload_cmd,
         )
 
     if args.mode == "camera":
@@ -989,6 +1089,8 @@ def main():
             args.max_segments,
             args.max_concurrency,
             args.audio_device,
+            args.segment_upload_dir,
+            args.segment_upload_cmd,
         )
 
     return 0
