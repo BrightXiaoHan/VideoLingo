@@ -771,6 +771,9 @@ def watch_and_play(
         if not os.path.isabs(session_dir):
             session_dir = os.path.abspath(session_dir)
     print(f"Session dir: {session_dir}")
+    session_name = os.path.basename(os.path.normpath(session_dir)) or "session"
+    default_hls_root = os.path.join(shared_base, "hls_stream")
+    derived_hls_output_dir = hls_output_dir or os.path.join(default_hls_root, session_name)
 
     use_internal = False
     selected_player = player
@@ -807,7 +810,7 @@ def watch_and_play(
             f"Target: {resolved_url} (transport={rtsp_transport}, listen={'yes' if rtsp_listen else 'no'})"
         )
     elif player == "hls":
-        output_dir = hls_output_dir or os.path.join(shared_base, "hls_stream")
+        output_dir = derived_hls_output_dir
         try:
             hls_publisher = HlsPublisher(
                 output_dir,
@@ -945,8 +948,8 @@ def main():
     parser.add_argument(
         "--hls-output-dir",
         type=str,
-        default="output/hls_stream",
-        help="Directory to store generated HLS playlist and segments",
+        default="",
+        help="Directory to store generated HLS playlist and segments (default: auto per session under shared-base)",
     )
     parser.add_argument(
         "--hls-window-size",
