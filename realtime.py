@@ -6,6 +6,8 @@ import time
 import datetime
 import platform
 import shutil
+import json
+import yaml
 
 
 # ------------
@@ -551,6 +553,91 @@ def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, sess
 # File source pipeline
 # ------------
 
+def calibrate_voice_model(source_path, base_output, config_path):
+    """
+    Extract the first 45s of the source video, run the pipeline to generate a voice model,
+    and return the model ID.
+    """
+    print("🎤 Starting voice model calibration...")
+    
+    # Create calibration directory
+    calib_dir = os.path.join(base_output, "calibration")
+    ensure_dir(calib_dir)
+    
+    # 1. Extract first 45s
+    calib_source = os.path.join(calib_dir, "calib_source.mp4")
+    if os.path.exists(calib_source):
+        os.remove(calib_source)
+        
+    duration = ffprobe_duration_seconds(source_path)
+    if duration <= 0:
+        print("❌ Invalid source duration for calibration")
+        return None
+        
+    # Use first 45s or full video if shorter
+    extract_dur = min(duration, 45.0)
+    
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", "0",
+        "-t", str(extract_dur),
+        "-i", source_path,
+        "-c", "copy",
+        calib_source
+    ]
+    code, _, _ = run_cmd(cmd)
+    
+    if code != 0 or not os.path.exists(calib_source):
+        print("❌ Failed to extract calibration segment")
+        return None
+        
+    # 2. Run pipeline on this segment
+    # We need to run enough steps to trigger voice cloning (usually up to audio generation)
+    # But main.py "all" runs everything. That's fine.
+    print(f"🚀 Running calibration pipeline on {extract_dur}s sample...")
+    
+    # We need to make sure the config uses 'clone' mode for FishTTS
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+        
+    # Check if FishTTS clone mode is enabled
+    if config.get('tts_method') != 'fish_tts' or config.get('fish_tts', {}).get('mode') != 'clone':
+        print("ℹ️ FishTTS clone mode not enabled, skipping calibration")
+        return None
+        
+    # Run the pipeline
+    cmd = [sys.executable, "main.py", "--config", config_path, "--output", calib_dir, "all"]
+    log_out = open(os.path.join(calib_dir, "run.out"), "w", encoding="utf-8")
+    log_err = open(os.path.join(calib_dir, "run.err"), "w", encoding="utf-8")
+    
+    proc = subprocess.run(cmd, stdout=log_out, stderr=log_err, text=True)
+    log_out.close()
+    log_err.close()
+    
+    if proc.returncode != 0:
+        print("❌ Calibration pipeline failed")
+        return None
+        
+    # 3. Retrieve the generated model ID
+    # The model ID is cached in voice_clone_cache.json in the output directory
+    cache_path = os.path.join(calib_dir, "voice_clone_cache.json")
+    if not os.path.exists(cache_path):
+        print("❌ Voice clone cache not found after calibration")
+        return None
+        
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            model_id = data.get('model_id')
+            if model_id:
+                print(f"✅ Calibration successful! Global Model ID: {model_id}")
+                return model_id
+    except Exception as e:
+        print(f"❌ Failed to read voice clone cache: {e}")
+        
+    return None
+
+
 def process_file_source(
     source_path,
     base_output,
@@ -566,6 +653,35 @@ def process_file_source(
 ):
     config_infos = prepare_config_infos(config_paths, base_output)
     print_session_overview(config_infos)
+    
+    # --- Calibration Start ---
+    # Check if we need calibration (only for the first config if multiple)
+    # We assume all configs might benefit, but usually we just calibrate for the primary one
+    # or we can calibrate for each if they are different. 
+    
+    # Let's do a pass to calibrate and update configs
+    for info in config_infos:
+        model_id = calibrate_voice_model(source_path, info["session_dir"], info["config_path"])
+        if model_id:
+            # Create a temporary config with forced model ID
+            with open(info["config_path"], 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            # Inject force_model_id
+            if 'fish_tts' not in config:
+                config['fish_tts'] = {}
+            config['fish_tts']['force_model_id'] = model_id
+            
+            # Save temp config
+            temp_config_path = os.path.join(info["session_dir"], "config_calibrated.yaml")
+            with open(temp_config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, allow_unicode=True)
+                
+            # Update info to use temp config
+            info["config_path"] = temp_config_path
+            print(f"🔄 Updated config for {info['identifier']} to use calibrated model {model_id}")
+    # --- Calibration End ---
+
     use_labels = len(config_infos) > 1
     for info in config_infos:
         info["upload_opts"] = make_upload_opts(info["session_dir"], segment_upload_dir, segment_upload_cmd)

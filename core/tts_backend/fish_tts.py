@@ -285,6 +285,12 @@ def fish_tts_for_videolingo(text: str, save_as: str, number: int, task_df) -> bo
         return fish_tts_basic(text, save_as, reference_id)
 
     elif mode == "clone":
+        # Check if a specific model ID is forced (e.g. from realtime calibration)
+        forced_id = fish_set.get("force_model_id")
+        if forced_id:
+            print(f"Using forced model ID: {forced_id}")
+            return fish_tts_basic(text, save_as, forced_id)
+
         # Use voice cloning
         video_file = find_video_files()
         model_name = hashlib.md5(video_file.encode()).hexdigest()[:8]
