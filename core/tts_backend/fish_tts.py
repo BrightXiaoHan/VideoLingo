@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import time
 import uuid
@@ -8,7 +9,7 @@ import requests
 from core._1_ytdlp import find_video_files
 from core.asr_backend.audio_preprocess import get_audio_duration
 from core.utils import *
-from core.utils.models import _AUDIO_REFERS_DIR
+from core.utils.models import _AUDIO_REFERS_DIR, get_output_dir
 from pydub import AudioSegment
 
 # ------------
@@ -247,6 +248,36 @@ def fish_tts_for_videolingo(text: str, save_as: str, number: int, task_df) -> bo
     fish_set = load_key("fish_tts")
     mode = fish_set.get("mode", "preset")
 
+    # ------------
+    # Local cache helpers to avoid cross-process config writes
+    # ------------
+    def _get_clone_cache_path():
+        return os.path.join(get_output_dir(), "voice_clone_cache.json")
+
+    def _load_cached_model():
+        path = _get_clone_cache_path()
+        if not os.path.exists(path):
+            # Fallback: try existing config values without writing back
+            try:
+                return load_key("fish_tts.custom_model_name"), load_key("fish_tts.custom_model_id")
+            except Exception:
+                return None, None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data.get("model_name"), data.get("model_id")
+        except Exception as exc:
+            print(f"⚠️  Failed to read clone cache: {exc}")
+            return None, None
+
+    def _save_cached_model(model_name, model_id):
+        path = _get_clone_cache_path()
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"model_name": model_name, "model_id": model_id}, fh)
+        except Exception as exc:
+            print(f"⚠️  Failed to write clone cache: {exc}")
+
     if mode == "preset":
         # Use preset voice
         character = fish_set["character"]
@@ -259,9 +290,9 @@ def fish_tts_for_videolingo(text: str, save_as: str, number: int, task_df) -> bo
         model_name = hashlib.md5(video_file.encode()).hexdigest()[:8]
         print(f"Using model name: {model_name}")
 
-        stored_model_name = load_key("fish_tts.custom_model_name")
+        cached_name, cached_id = _load_cached_model()
 
-        if stored_model_name != model_name:
+        if cached_name != model_name or not cached_id:
             # Need to create new model
             print("Creating new voice model...")
 
@@ -287,13 +318,12 @@ def fish_tts_for_videolingo(text: str, save_as: str, number: int, task_df) -> bo
                 reference_id = fish_set["character_id_dict"][character]
                 return fish_tts_basic(text, save_as, reference_id)
 
-            # Save model info
-            update_key("fish_tts.custom_model_id", model_id)
-            update_key("fish_tts.custom_model_name", model_name)
+            # Save model info to local cache only (avoid touching global config)
+            _save_cached_model(model_name, model_id)
         else:
             # Use existing model
-            model_id = load_key("fish_tts.custom_model_id")
-            print(f"Using existing model: {model_id}")
+            model_id = cached_id
+            print(f"Using existing model from cache: {model_id}")
 
         # Generate TTS with cloned voice
         return fish_tts_basic(text, save_as, model_id)
