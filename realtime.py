@@ -553,10 +553,86 @@ def build_camera_capture_cmd(camera_spec, segment_pattern, segment_seconds, sess
 # File source pipeline
 # ------------
 
+def find_first_speech_start(source_path, min_duration=2.0, silence_db="-30"):
+    """Find the start time of the first speech segment longer than min_duration."""
+    duration = ffprobe_duration_seconds(source_path)
+    if duration <= 0:
+        return 0.0
+        
+    # Run silencedetect
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats",
+        "-i", source_path,
+        "-af", f"silencedetect=n={silence_db}dB:d=0.5",
+        "-vn", "-f", "null", "-"
+    ]
+    code, _, err = run_cmd(cmd)
+    if code != 0:
+        return 0.0
+        
+    # Parse output to find non-silent chunks
+    lines = err.splitlines()
+    silence_ends = []
+    silence_starts = []
+    
+    for line in lines:
+        if "silence_end" in line:
+            try:
+                t = float(line.split("silence_end:")[1].split("|")[0].strip())
+                silence_ends.append(t)
+            except: pass
+        elif "silence_start" in line:
+            try:
+                t = float(line.split("silence_start:")[1].strip())
+                silence_starts.append(t)
+            except: pass
+            
+    # Logic:
+    # If starts with silence (silence_start not found before first silence_end), then speech starts at silence_end.
+    # If starts with speech, first event is silence_start.
+    
+    # We want a chunk of audio that is NOT silence and has length > min_duration.
+    
+    # Reconstruct timeline
+    events = [] # (time, type) type=0 for start of silence, 1 for end of silence
+    for t in silence_starts: events.append((t, 0))
+    for t in silence_ends: events.append((t, 1))
+    events.sort()
+    
+    # Assuming file starts at 0.0. 
+    # If first event is silence_start at T, then [0, T] is speech.
+    # If first event is silence_end at T, then [0, T] was silence.
+    
+    curr_time = 0.0
+    is_speech = True # Assume speech at start unless proven otherwise
+    
+    # If the very first event is silence_end, it means we started in silence.
+    if events and events[0][1] == 1:
+        is_speech = False
+        
+    for t, etype in events:
+        if is_speech:
+            # Speech segment from curr_time to t
+            dur = t - curr_time
+            if dur >= min_duration:
+                print(f"🎤 Found speech segment: {curr_time:.2f}s - {t:.2f}s (dur={dur:.2f}s)")
+                return curr_time
+        
+        curr_time = t
+        is_speech = (etype == 1) # If silence ended, now it's speech. If silence started, now it's silence.
+        
+    # Check last segment
+    if is_speech and duration - curr_time >= min_duration:
+        print(f"🎤 Found speech segment: {curr_time:.2f}s - {duration:.2f}s")
+        return curr_time
+        
+    return 0.0
+
+
 def calibrate_voice_model(source_path, base_output, config_path):
     """
-    Extract the first 45s of the source video, run the pipeline to generate a voice model,
-    and return the model ID.
+    Extract a sample from the source video (skipping intro silence), 
+    run the pipeline to generate a voice model, and return the model ID.
     """
     print("🎤 Starting voice model calibration...")
     
@@ -564,7 +640,11 @@ def calibrate_voice_model(source_path, base_output, config_path):
     calib_dir = os.path.join(base_output, "calibration")
     ensure_dir(calib_dir)
     
-    # 1. Extract first 45s
+    # 1. Find speech start
+    speech_start = find_first_speech_start(source_path)
+    print(f"🎤 Speech starts at: {speech_start:.2f}s")
+    
+    # 2. Extract 60s sample
     calib_source = os.path.join(calib_dir, "calib_source.mp4")
     if os.path.exists(calib_source):
         os.remove(calib_source)
@@ -574,12 +654,18 @@ def calibrate_voice_model(source_path, base_output, config_path):
         print("❌ Invalid source duration for calibration")
         return None
         
-    # Use first 45s or full video if shorter
-    extract_dur = min(duration, 45.0)
+    # Extract 60s (or less if near end)
+    extract_dur = 60.0
+    if speech_start + extract_dur > duration:
+        extract_dur = duration - speech_start
+        
+    if extract_dur < 10.0:
+        print("❌ Remaining duration too short for calibration")
+        return None
     
     cmd = [
         "ffmpeg", "-y",
-        "-ss", "0",
+        "-ss", str(speech_start),
         "-t", str(extract_dur),
         "-i", source_path,
         "-c", "copy",
@@ -591,9 +677,7 @@ def calibrate_voice_model(source_path, base_output, config_path):
         print("❌ Failed to extract calibration segment")
         return None
         
-    # 2. Run pipeline on this segment
-    # We need to run enough steps to trigger voice cloning (usually up to audio generation)
-    # But main.py "all" runs everything. That's fine.
+    # 3. Run pipeline on this segment
     print(f"🚀 Running calibration pipeline on {extract_dur}s sample...")
     
     # We need to make sure the config uses 'clone' mode for FishTTS
@@ -616,13 +700,17 @@ def calibrate_voice_model(source_path, base_output, config_path):
     
     if proc.returncode != 0:
         print("❌ Calibration pipeline failed")
+        # Print last few lines of error log
+        try:
+            with open(os.path.join(calib_dir, "run.err"), "r", encoding="utf-8") as f:
+                print(f"Last error logs:\n{f.read()[-500:]}")
+        except: pass
         return None
         
-    # 3. Retrieve the generated model ID
-    # The model ID is cached in voice_clone_cache.json in the output directory
+    # 4. Retrieve the generated model ID
     cache_path = os.path.join(calib_dir, "voice_clone_cache.json")
     if not os.path.exists(cache_path):
-        print("❌ Voice clone cache not found after calibration")
+        print("❌ Voice clone cache not found after calibration. This usually means no suitable reference audio was found in the sample.")
         return None
         
     try:

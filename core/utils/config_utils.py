@@ -13,6 +13,7 @@ yaml.preserve_quotes = True
 
 def load_key(key):
     with lock:
+        # print(f"DEBUG: Loading config from {CONFIG_PATH}")
         with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
             data = yaml.load(file)
 
