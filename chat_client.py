@@ -212,13 +212,13 @@ class TranslationService:
     def __init__(self):
         self.available_languages = {
             'en': 'English',
-            'zh': 'Chinese',
-            'ja': 'Japanese',
+            'zh': '简体中文',
+            'ja': '日本語',
             'es': 'Spanish',
             'fr': 'French',
             'de': 'German',
             'ru': 'Russian',
-            'it': 'Italian'
+            'it': 'Italian',
         }
     
     def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
@@ -241,6 +241,8 @@ class TranslationService:
                 "You are a professional translator. "
                 f"Translate the following text from {source_name} ({source_lang}) "
                 f"to {target_name} ({target_lang}). "
+                "The output MUST be written only in the target language/script; "
+                "do not use Chinese or any other language unless the target is Chinese. "
                 "Preserve the meaning and keep line breaks the same as the input. "
                 "Return only the translated text without additional commentary.\n\n"
                 "<text>\n"
