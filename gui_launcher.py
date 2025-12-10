@@ -305,11 +305,11 @@ class LauncherApp(tk.Tk):
 
         row = 0
         ttk.Label(client_frame, text="Server Host:").grid(row=row, column=0, sticky=tk.W, pady=4)
-        self.client_host_var = tk.StringVar(value="localhost")
+        self.client_host_var = tk.StringVar(value="43.207.122.123")
         ttk.Entry(client_frame, textvariable=self.client_host_var, width=15).grid(row=row, column=1, sticky=tk.W, padx=5)
         
         ttk.Label(client_frame, text="Port:").grid(row=row, column=2, sticky=tk.W, pady=4, padx=(10,0))
-        self.client_port_var = tk.StringVar(value="8888")
+        self.client_port_var = tk.StringVar(value="10000")
         ttk.Entry(client_frame, textvariable=self.client_port_var, width=8).grid(row=row, column=3, sticky=tk.W, padx=5)
         
         row += 1
