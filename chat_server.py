@@ -91,17 +91,25 @@ class ChatServer:
             self.clients[client_id] = client_socket
         
         try:
+            buffer = ""
             while self.running:
                 data = client_socket.recv(4096).decode('utf-8')
                 if not data:
                     break
-                
-                try:
-                    message_data = json.loads(data)
-                    self._process_message(client_id, message_data)
-                except json.JSONDecodeError:
-                    print(f"Invalid JSON from {client_id}")
-                    
+
+                buffer += data
+                lines = buffer.split('\n')
+                buffer = lines[-1]  # keep incomplete part
+
+                for line in lines[:-1]:
+                    if not line.strip():
+                        continue
+                    try:
+                        message_data = json.loads(line)
+                        self._process_message(client_id, message_data)
+                    except json.JSONDecodeError:
+                        print(f"Invalid JSON from {client_id}: {line}")
+                        
         except Exception as e:
             print(f"Error handling client {client_id}: {e}")
         finally:
