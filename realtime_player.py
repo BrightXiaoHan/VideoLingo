@@ -174,9 +174,12 @@ def find_latest_session_dir(base_dir):
     return os.path.join(base_dir, latest)
 
 
-def segment_video_path(session_dir, index):
+def segment_video_path(session_dir, index, variant="dub"):
     seg_dir = os.path.join(session_dir, f"seg_{index:04d}")
-    return os.path.join(seg_dir, "output_dub.mp4")
+    variant = (variant or "dub").lower()
+    if variant not in {"dub", "sub"}:
+        variant = "dub"
+    return os.path.join(seg_dir, f"output_{variant}.mp4")
 
 
 # ------------
@@ -750,6 +753,7 @@ def watch_and_play(
     start_index,
     poll_interval,
     player,
+    segment_variant="dub",
     rtsp_url=None,
     rtsp_transport="tcp",
     rtsp_listen=False,
@@ -770,7 +774,7 @@ def watch_and_play(
     else:
         if not os.path.isabs(session_dir):
             session_dir = os.path.abspath(session_dir)
-    print(f"Session dir: {session_dir}")
+    print(f"Session dir: {session_dir} (variant={segment_variant})")
     session_name = os.path.basename(os.path.normpath(session_dir)) or "session"
     default_hls_root = os.path.join(shared_base, "hls_stream")
     derived_hls_output_dir = hls_output_dir or os.path.join(default_hls_root, session_name)
@@ -853,7 +857,7 @@ def watch_and_play(
     index = start_index
     try:
         while True:
-            video_path = segment_video_path(session_dir, index)
+            video_path = segment_video_path(session_dir, index, segment_variant)
 
             if stability_tracker.is_stable(video_path):
                 if validate_video_file(video_path):
@@ -928,6 +932,13 @@ def main():
         help="Preferred player (internal uses the built-in OpenCV viewer)",
     )
     parser.add_argument(
+        "--segment-variant",
+        type=str,
+        default="dub",
+        choices=["dub", "sub"],
+        help="Which output to play/stream: dub=translated audio, sub=original audio with translated subtitles",
+    )
+    parser.add_argument(
         "--rtsp-url",
         type=str,
         default="rtsp://127.0.0.1:8554/videolingo",
@@ -988,6 +999,7 @@ def main():
         args.start_index,
         args.poll_interval,
         args.player,
+        args.segment_variant,
         args.rtsp_url,
         args.rtsp_transport,
         args.rtsp_listen,
