@@ -177,7 +177,7 @@ def find_latest_session_dir(base_dir):
 def segment_video_path(session_dir, index, variant="dub"):
     seg_dir = os.path.join(session_dir, f"seg_{index:04d}")
     variant = (variant or "dub").lower()
-    if variant not in {"dub", "sub"}:
+    if variant not in {"dub", "sub", "dub_nosub"}:
         variant = "dub"
     return os.path.join(seg_dir, f"output_{variant}.mp4")
 
@@ -935,8 +935,8 @@ def main():
         "--segment-variant",
         type=str,
         default="dub",
-        choices=["dub", "sub"],
-        help="Which output to play/stream: dub=translated audio, sub=original audio with translated subtitles",
+        choices=["dub", "sub", "dub_nosub"],
+        help="Which output to play/stream: dub=translated audio, sub=original audio with translated subtitles, dub_nosub=translated audio without subtitles",
     )
     parser.add_argument(
         "--rtsp-url",

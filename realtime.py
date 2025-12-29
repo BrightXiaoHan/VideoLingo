@@ -70,6 +70,7 @@ def prepare_config_infos(config_paths, base_output):
                 "timestamp": timestamp,
                 "jobs": [],
                 "finished_map": {},
+                "finished_map_nosub": {},
                 "playback_state": {"current": None, "next_index": 0},
                 "upload_opts": None,
             }
@@ -311,7 +312,7 @@ def start_segment_pipeline_async(segment_dir, config_path):
     return {"proc": proc, "dir": segment_dir, "out": log_out, "err": log_err, "done": False}
 
 
-def poll_jobs_and_collect(jobs, finished_map, prefix=None, upload_opts=None):
+def poll_jobs_and_collect(jobs, finished_map, finished_map_nosub=None, prefix=None, upload_opts=None):
     label = f"[{prefix}] " if prefix else ""
     for job in jobs:
         if job["done"]:
@@ -326,6 +327,7 @@ def poll_jobs_and_collect(jobs, finished_map, prefix=None, upload_opts=None):
             job["err"].close()
         seg_dir = job["dir"]
         out_video = os.path.join(seg_dir, "output_dub.mp4")
+        out_video_nosub = os.path.join(seg_dir, "output_dub_nosub.mp4")
         index = int(os.path.basename(seg_dir).split("_")[-1])
         if os.path.exists(out_video) and os.path.getsize(out_video) > 0 and ret == 0:
             finished_map[index] = out_video
@@ -334,6 +336,9 @@ def poll_jobs_and_collect(jobs, finished_map, prefix=None, upload_opts=None):
                 perform_segment_upload(out_video, seg_dir, index, upload_opts)
         else:
             print(f"{label}Pipeline failed for segment {index}")
+        if finished_map_nosub is not None:
+            if os.path.exists(out_video_nosub) and os.path.getsize(out_video_nosub) > 0 and ret == 0:
+                finished_map_nosub[index] = out_video_nosub
 
 
 def try_close(fh):
@@ -799,6 +804,7 @@ def process_file_source(
             poll_jobs_and_collect(
                 info["jobs"],
                 info["finished_map"],
+                info["finished_map_nosub"],
                 prefix=prefix,
                 upload_opts=info.get("upload_opts"),
             )
@@ -882,6 +888,10 @@ def process_file_source(
         dubbed_videos = [info["finished_map"][i] for i in indices]
         final_out = os.path.join(info["session_dir"], "final_dub.mp4")
         concat_segments(final_out, dubbed_videos, log_dir=info["session_dir"])
+        nosub_indices = sorted(info["finished_map_nosub"].keys())
+        nosub_videos = [info["finished_map_nosub"][i] for i in nosub_indices]
+        final_out_nosub = os.path.join(info["session_dir"], "final_dub_nosub.mp4")
+        concat_segments(final_out_nosub, nosub_videos, log_dir=info["session_dir"])
 
     return 0
 
@@ -1020,6 +1030,7 @@ def process_camera_source(
             poll_jobs_and_collect(
                 info["jobs"],
                 info["finished_map"],
+                info["finished_map_nosub"],
                 prefix=prefix,
                 upload_opts=info.get("upload_opts"),
             )
@@ -1104,6 +1115,10 @@ def process_camera_source(
         dubbed_videos = [info["finished_map"][i] for i in indices]
         final_out = os.path.join(info["session_dir"], "final_dub.mp4")
         concat_segments(final_out, dubbed_videos, log_dir=info["session_dir"])
+        nosub_indices = sorted(info["finished_map_nosub"].keys())
+        nosub_videos = [info["finished_map_nosub"][i] for i in nosub_indices]
+        final_out_nosub = os.path.join(info["session_dir"], "final_dub_nosub.mp4")
+        concat_segments(final_out_nosub, nosub_videos, log_dir=info["session_dir"])
 
     return 0
 
